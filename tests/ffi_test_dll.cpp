@@ -73,6 +73,24 @@ int64_t dll_fail(int64_t* args, int64_t nargs, int64_t* out) {
     return 42;      // 非 0 表示失败
 }
 
+// ---- 故意崩溃的函数(测隔离模式) ----
+// 段错误:隔离模式下只有子进程死,宿主应拿到 "worker crashed"。
+// 进程内模式下会带崩宿主 —— 所以这个函数只在隔离测试里用。
+// ⚠️ 必须在 extern "C" 里,否则符号会被 C++ mangle,宿主 dlsym 找不到。
+int64_t dll_crash(int64_t* args, int64_t nargs, int64_t* out) {
+    (void)args; (void)nargs; (void)out;
+    volatile int* p = (volatile int*)0;
+    *p = 42;              // 故意段错误
+    return 0;
+}
+
+// 死循环:测宿主侧的超时机制
+int64_t dll_hang(int64_t* args, int64_t nargs, int64_t* out) {
+    (void)args; (void)nargs; (void)out;
+    for (;;) { }
+    return 0;
+}
+
 // ---- 描述符 ----
 // 返回 JSON 文本的长度;内容在 buf 里。
 int64_t xmex_ffi_describe(char* buf, int64_t cap) {
@@ -82,7 +100,8 @@ int64_t xmex_ffi_describe(char* buf, int64_t cap) {
         "{\"name\":\"dll_greet\",\"params\":[\"str\"],\"ret\":\"str\"},"
         "{\"name\":\"dll_scale\",\"params\":[\"float\",\"int\"],\"ret\":\"float\"},"
         "{\"name\":\"dll_flip\",\"params\":[\"bool\"],\"ret\":\"bool\"},"
-        "{\"name\":\"dll_fail\",\"params\":[],\"ret\":\"int\"}"
+        "{\"name\":\"dll_fail\",\"params\":[],\"ret\":\"int\"},"
+        "{\"name\":\"dll_crash\",\"params\":[],\"ret\":\"int\"}"
         "]}";
     int64_t n = (int64_t)strlen(d);
     if (buf && cap > 0) {
@@ -94,3 +113,4 @@ int64_t xmex_ffi_describe(char* buf, int64_t cap) {
 }
 
 }  // extern "C"
+

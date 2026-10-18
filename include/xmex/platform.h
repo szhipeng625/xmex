@@ -58,6 +58,73 @@
 #endif
 
 // ===========================================================================
+// 匿名管道 + 子进程 spawn
+//
+// 给 FFI 的隔离模式用:宿主起一个子进程加载 DLL,两边用管道通信。
+// DLL 崩了只死子进程,宿主从管道读到 EOF,waitpid 拿到退出码。
+//
+// 为什么需要这层抽象:Windows 没有 fork()。POSIX 用 pipe+fork+execv,
+// Windows 用 CreatePipe+CreateProcess(句柄要显式继承给子进程)。
+// 两边语义对齐成同一组调用。
+// ===========================================================================
+
+#ifdef XMEX_WINDOWS
+
+// 管道句柄。Windows 上是 HANDLE(POSIX 上是 int fd)。
+typedef void* xmex_pipe_t;
+#define XMEX_PIPE_INVALID ((xmex_pipe_t)INVALID_HANDLE_VALUE)
+
+// 子进程句柄与 pid
+typedef void* xmex_proc_t;
+#define XMEX_PROC_INVALID ((xmex_proc_t)INVALID_HANDLE_VALUE)
+
+#else
+
+typedef int xmex_pipe_t;
+#define XMEX_PIPE_INVALID (-1)
+typedef int xmex_proc_t;
+#define XMEX_PROC_INVALID (-1)
+
+#endif
+
+// 管道方向
+#define XMEX_PIPE_READ  0
+#define XMEX_PIPE_WRITE 1
+
+// 建一对管道。out_read 拿到读端,out_write 拿到写端。
+// 失败返回 0,并把两端置为 XMEX_PIPE_INVALID。
+// 管道是"继承型"的:spawn 时子进程会拿到它们。
+extern "C" int xmex_pipe_pair(xmex_pipe_t* out_read, xmex_pipe_t* out_write);
+
+// 起一个子进程:
+//   exe_path   —— 可执行文件路径
+//   argv       —— 参数数组(不含程序名,会自动补上 exe_path)
+//   argc       —— argv 的个数
+//   in_pipe    —— 给子进程的 stdin(读端);XMEX_PIPE_INVALID 表示 /dev/null
+//   out_pipe   —— 给子进程的 stdout(写端);XMEX_PIPE_INVALID 表示丢弃
+//   out_proc   —— 返回子进程句柄
+// 返回 0 成功。
+extern "C" int xmex_spawn(const char* exe_path, const char* const* argv, int argc,
+                          xmex_pipe_t in_pipe, xmex_pipe_t out_pipe,
+                          xmex_proc_t* out_proc);
+
+// 等待子进程结束。返回退出码;若是被信号杀死,返回 128+signal。
+extern "C" int xmex_proc_wait(xmex_proc_t proc);
+
+// 取子进程 pid(用于日志与诊断)。
+extern "C" long xmex_proc_pid(xmex_proc_t proc);
+
+// 关管道端。
+extern "C" void xmex_pipe_close(xmex_pipe_t p);
+
+// 从管道读 n 字节。返回实际读到的字节数;0 表示 EOF(对端已关闭);
+// -1 表示错误。
+extern "C" long xmex_pipe_read(xmex_pipe_t p, void* buf, unsigned long n);
+
+// 往管道写 n 字节。返回实际写入的字节数;-1 表示错误。
+extern "C" long xmex_pipe_write(xmex_pipe_t p, const void* buf, unsigned long n);
+
+// ===========================================================================
 // 路径分隔符
 // ===========================================================================
 #ifdef XMEX_WINDOWS

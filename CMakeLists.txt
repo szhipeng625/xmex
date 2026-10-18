@@ -75,6 +75,9 @@ set(XMEX_RUNTIME_SOURCES
   # ffi_api.cpp 提供 kv.ffi()/kv.ffi_list() 与实例方法注册。
   # 同样跨平台:它只依赖运行时自身的 Value/Dict/List API。
   runtime/ffi_api.cpp
+  # 平台抽象:管道 + 子进程 spawn(Windows CreateProcess / POSIX fork+exec)。
+  # FFI 隔离模式要用它起 agent 子进程。
+  runtime/platform_proc.cpp
   # distributed_adapter.cpp 是纯适配层：cluster/kv 段带 _WIN32 守卫（依赖只在
   # Linux 构建的 cluster_api / kv_admin_api.cpp）。自研 raft 已于 2026-10 移除，
   # 理由与后续方案见 docs/raft-removal.md。
@@ -229,6 +232,25 @@ add_test(NAME ffi_test COMMAND ffi_test)
 set_tests_properties(ffi_test PROPERTIES
   WORKING_DIRECTORY $<TARGET_FILE_DIR:ffi_test>)
 
+# FFI 隔离模式的 agent:独立可执行文件,加载 DLL 并处理宿主的管道请求。
+#
+# 刻意做成独立 exe 而不是直接 fork 宿主:
+#   1. 子进程是干净的,只加载目标 DLL —— 不会把宿主已加载的运行时、
+#      已注册的 GC 根、已打开的套接字都带过去
+#   2. DLL 崩了时,退出码干净地反映在 agent 的退出状态上
+#   3. 将来做远程 agent 时,同一个 exe 换个连接方式即可
+#
+# 依赖 ffi.cpp(进程内 FFI)+ffi_worker.cpp(请求循环),不链 xmex_runtime ——
+# agent 不需要语言运行时,只要能调 DLL 就行。
+add_executable(xmex_ffi_agent tools/ffi_agent.cpp
+               runtime/ffi_worker.cpp runtime/ffi.cpp)
+target_include_directories(xmex_ffi_agent PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/runtime)
+
+# agent 必须和 xmex_runtime 在同一个目录 —— 宿主靠"同目录"推断它的位置
+# (见 runtime/ffi_api.cpp 的 agent_path())。两个目标的输出目录都是
+# ${CMAKE_BINARY_DIR}/bin,所以天然满足。
+
 # FFI 的端到端演示:C++ 宿主 + PyLite 脚本实际加载动态库并调用。
 #
 # 这是唯一能验证「PyLite 源码 → 编译 → 链接 → 加载 DLL → 调用」整条链路的
@@ -253,6 +275,29 @@ target_link_libraries(ffi_demo PRIVATE xmex_runtime ffi_test_dll)
 add_test(NAME ffi_demo COMMAND ffi_demo)
 set_tests_properties(ffi_demo PROPERTIES
   WORKING_DIRECTORY $<TARGET_FILE_DIR:ffi_demo>)
+
+# FFI 隔离模式的端到端演示。
+# 关键验证点:dll_crash 让 DLL 段错误,宿主必须活着并继续往下跑 ——
+# 这正是隔离的意义,也是进程内模式做不到的。
+add_executable(ffi_isolated_demo examples/ffi_isolated_main.cpp)
+target_include_directories(ffi_isolated_demo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+set(FFI_ISOLATED_OBJ ${CMAKE_CURRENT_BINARY_DIR}/ffi_isolated_demo.o)
+add_custom_command(
+  OUTPUT ${FFI_ISOLATED_OBJ}
+  COMMAND xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/ffi_isolated_demo.pys
+          -o ${FFI_ISOLATED_OBJ} -I ffi_isolated_demo
+  DEPENDS xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/ffi_isolated_demo.pys
+  COMMENT "xmexc examples/ffi_isolated_demo.pys")
+add_custom_target(ffi_isolated_demo_obj DEPENDS ${FFI_ISOLATED_OBJ})
+
+add_dependencies(ffi_isolated_demo ffi_isolated_demo_obj xmex_ffi_agent)
+target_sources(ffi_isolated_demo PRIVATE ${FFI_ISOLATED_OBJ})
+target_link_libraries(ffi_isolated_demo PRIVATE xmex_runtime ffi_test_dll)
+
+add_test(NAME ffi_isolated_demo COMMAND ffi_isolated_demo)
+set_tests_properties(ffi_isolated_demo PROPERTIES
+  WORKING_DIRECTORY $<TARGET_FILE_DIR:ffi_isolated_demo>)
 
 add_executable(jit_spike tests/jit_spike.cpp)
 target_include_directories(jit_spike PRIVATE ${LLVM_INCLUDE_DIRS})

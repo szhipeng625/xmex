@@ -579,6 +579,8 @@ static const char *builtinModulePrefix(const std::string &mod, const std::string
     // 详见 runtime/ffi.h 与 docs/ffi-design.md。
     if (fn == "ffi") return "kv_ffi_v";
     if (fn == "ffi_list") return "kv_ffi_list_v";
+    // 隔离模式:把 DLL 加载到子进程,DLL 崩溃不影响宿主
+    if (fn == "ffi_isolated") return "kv_ffi_isolated_v";
     // 节点内置 MQ 队列方法(2026-10 增补)
     if (fn == "enqueue") return "kv_enqueue_v";
     if (fn == "dequeue") return "kv_dequeue_v";

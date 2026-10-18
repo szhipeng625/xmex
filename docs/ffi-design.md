@@ -25,7 +25,86 @@ agent 内部再用 FFI 加载远端的 `.so`。这不在本文范围（见第六
 
 ---
 
-## 二、为什么要求动态库导出「描述符」
+## 二、两种模式：进程内 与 隔离
+
+`kv.ffi(path)` 把 DLL 加载在**当前进程**里。`kv.ffi_isolated(path)` 则起一个
+**子进程**加载它，宿主只负责发消息收消息。
+
+| | `kv.ffi(path)` | `kv.ffi_isolated(path)` |
+|---|---|---|
+| DLL 加载在哪 | 宿主进程 | 子进程 |
+| DLL 崩溃 | **宿主一起死** | 只有子进程死，宿主拿到 `"worker crashed (exit code 139)"` |
+| 性能 | 直接调用，无序列化 | 每次调用一次管道往返 + JSON 序列化 |
+| 回调 | 支持（函数指针直接给） | **不支持**（2026-10 第一版） |
+| 未来 | — | 协议与远程 agent 一致，换连接方式即可 |
+
+**实测**（`examples/ffi_isolated_demo.pys`）：
+
+```
+isolated dll_add(3,4): {"ok":true,"value":7}
+isolated dll_crash: {"ok":false,"error":"worker crashed (exit code 139)"}
+after crash: {"ok":false,"error":"worker already dead (exit code 139)"}
+=== host is still alive, demo done ===
+```
+
+退出码 139 = 128 + SIGSEGV，与 POSIX 语义一致（Windows 上 `GetExitCodeProcess`
+给的是 NTSTATUS `0xC0000005`，已折算成 POSIX 风格）。
+
+### 2.1 隔离模式的结构
+
+```
+宿主(PyLite)                          子进程(xmex_ffi_agent)
+   │ 写请求(管道)                          │
+   ├────────── {"op":"call",...} ────────▶ │ 加载 DLL
+   │                                         │ 调函数
+   │ ◀────────── {"ok":true,"value":7} ─────┤
+   │                                         │
+   │  ← DLL 段错误 → 子进程死 →             │
+   │     宿主读到 EOF → waitpid → 139        │
+```
+
+**为什么 agent 是独立可执行文件**，而不是直接 fork 宿主：
+
+1. 子进程是干净的，只加载目标 DLL —— 不会把宿主已加载的运行时、
+   已注册的 GC 根、已打开的套接字都带过去
+2. DLL 崩了时，退出码干净地反映在 agent 的退出状态上
+3. 将来做远程 agent 时，同一个可执行文件换个连接方式即可
+
+### 2.2 协议
+
+一行一条 JSON。请求：
+
+```json
+{"op":"call","fn":"dll_add","args":[3,4]}
+{"op":"symbols"}
+{"op":"describe","fn":"dll_add"}
+{"op":"quit"}
+```
+
+响应：
+
+```json
+{"ok":true,"value":7}
+{"ok":true,"symbols":["dll_add",...]}
+{"ok":false,"error":"..."}
+```
+
+握手：agent 启动后先发一行 `{"ok":true,"loaded":"ffi-1"}`，表示 DLL 加载成功；
+加载失败则发 `{"ok":false,"error":"..."}` 并退出。
+
+### 2.3 agent 在哪
+
+宿主按「与宿主可执行文件同目录」推断：`bin/xmex_ffi_agent`。也可以用环境变量
+`XMEX_FFI_AGENT` 指定绝对路径（部署到别处时用）。
+
+### 2.4 隔离模式暂不支持回调
+
+回调要跨进程反向通道（子进程 → 宿主），且要处理「宿主正在等调用结果、
+同时又要执行回调」的重入问题。这是独立的一期工作。
+
+---
+
+## 三、为什么要求动态库导出「描述符」
 
 PyLite 侧的调用是 `lib.init(1, "abc")` —— **参数个数与类型在编译期不知道**。
 `init` 是运行时的名字，参数是运行时的值。
@@ -57,7 +136,7 @@ int64_t xmex_ffi_describe(char* buf, int64_t cap);
 
 ---
 
-## 三、调用约定
+## 四、调用约定
 
 所有被调函数按**同一个原型**导出：
 
@@ -96,10 +175,11 @@ per-call 的内存，或者约定由宿主提供输出缓冲。
 
 ---
 
-## 四、PyLite 侧用法
+## 五、PyLite 侧用法
 
 ```python
 lib = kv.ffi("./xx.dll")          # 加载;失败返回 {"ok":false,"error":...}
+lib2 = kv.ffi_isolated("./yy.dll")  # 隔离模式:加载到子进程
 
 print(lib.symbols())              # '["dll_add","dll_greet",...]'
 print(lib.describe("dll_add"))    # '{"name":"dll_add","params":["int","int"],"ret":"int"}'
@@ -127,9 +207,9 @@ JSON 字符串比解析嵌套结构省事得多（`kv.status` 等接口也是这
 
 ---
 
-## 五、实现要点
+## 六、实现要点
 
-### 5.1 加载与查找
+### 6.1 加载与查找
 
 用 `include/xmex/platform.h` 里已有的跨平台抽象：
 
@@ -143,12 +223,12 @@ XMEX_DLCLOSE →  Windows: FreeLibrary     /  Linux: dlclose
 加载 Windows DLL 正是它的主要用途，放进 `if(NOT WIN32)` 就等于在
 Windows 上把这个功能阉掉。
 
-### 5.2 描述符读取
+### 6.2 描述符读取
 
 描述符可能返回长度，也可能把内容写进 buf。实现用两段式：
 先给 64KB 缓冲，不够再按返回的长度重试一次。
 
-### 5.3 JSON 解析
+### 6.3 JSON 解析
 
 **没有引入通用 JSON 解析器**。描述符格式是我们自己定的，用专用的
 `JsonParser`（约 150 行）解析 —— 比通用解析器快，也更少出错。
@@ -156,7 +236,7 @@ Windows 上把这个功能阉掉。
 项目里现有的 JSON 处理（`cluster.cpp` 的 `extractJsonString`）都是
 「按 key 抠字符串」，不是解析器，不能直接复用。
 
-### 5.4 方法注册
+### 6.4 方法注册
 
 `lib` 是 `PY_INSTANCE`，类型名 `"ffi"`。方法通过
 `instance_register_method("ffi", 3, "symbols", 7, fn)` 注册，
@@ -165,9 +245,9 @@ Windows 上把这个功能阉掉。
 
 ---
 
-## 六、还没做的
+## 七、还没做的
 
-### 6.1 反向回调（`lib.on("init", handler)`）
+### 7.1 反向回调（`lib.on("init", handler)`）
 
 把 PyLite 函数的地址交给动态库，让它回调。PyLite 的函数符号是
 `xmex_<模块>_<函数>`，可以 `dlsym` 反查自身，所以技术上可行。
@@ -183,7 +263,7 @@ Windows 上把这个功能阉掉。
 
 所以回调这一期要连带改 GC，不是纯 FFI 层的事。
 
-### 6.2 远程动态库
+### 7.2 远程动态库
 
 形态必然是：
 
@@ -199,7 +279,7 @@ PyLite 侧                    远端
 协议格式（JSON over HTTP 还是自定义二进制）需要单独设计，
 它决定了后续所有兼容性。
 
-### 6.3 中间件
+### 7.3 中间件
 
 中间件也是动态库，复用同一套 FFI 机制。区别在于：中间件通常需要
 **进程隔离**（它崩了不该带崩宿主），所以要用「独立进程 + agent」的形态，
@@ -211,7 +291,7 @@ PyLite 侧                    远端
 
 ---
 
-## 七、测试
+## 八、测试
 
 `tests/ffi_test.cpp` 测一个**真实的**动态库（`tests/ffi_test_dll.cpp`），
 不是桩。覆盖：加载、符号列表、签名查询、int/float/bool/str 四种类型的
@@ -225,6 +305,9 @@ C++ 宿主 + PyLite 脚本，脚本里 `kv.ffi()` 加载 DLL 并调用其函数�
 ```bash
 cmake --build build && cd build && ctest -R ffi --output-on-failure
 ```
+
+`examples/ffi_isolated_demo.pys` + `examples/ffi_isolated_main.cpp` 测**隔离模式**，
+核心验证点是 `dll_crash` 让 DLL 段错误后**宿主必须活着**并继续往下跑。
 
 跨平台：Windows 上编 `.dll`，Linux 上编 `.so`，产物名不同，测试按平台猜。
 
@@ -276,4 +359,25 @@ error: no declaration matches 'xmex::Value* xmex::Abi::newSlot(...)'
 > 教训：做全局改名时，**必须检查目标名字在各个作用域下是否已有含义**。
 > `PyValue` → `xmex::Value` 这个改动在 runtime 里没问题，但在 `namespace xmex`
 > 内部就撞上了 LLVM 的 `Value`。
+
+**5. Windows 上 `WaitForSingleObject` 的返回值陷阱。**
+
+```cpp
+if (!WaitForSingleObject(h, INFINITE)) return -1;   // ✗ 错
+```
+
+`WAIT_OBJECT_0` 的值**就是 0**，所以 `!` 把成功当成了失败 —— 退出码永远是 -1，
+崩溃隔离看起来"生效了"但退出码不对。必须显式比 `WAIT_OBJECT_0`。
+
+**6. `CreateProcessA` 的命令行缓冲区必须可写。**
+
+`std::string` 的 `operator[]` 在 C++11 之后不保证可写（`&s[0]` 只在
+`s[s.size()] == '\0'` 时合法），而 `CreateProcessA` 会**就地修改**命令行。
+用 `std::vector<char>` 显式留出结尾的 `\0`。
+
+**7. 测试 DLL 的崩溃函数必须放在 `extern "C"` 里。**
+
+写在块外会被 C++ mangle（导出成 `_Z9dll_crashPxxS_`），宿主 `dlsym`
+按 `dll_crash` 找不到 —— 报 "symbol not found"，而不是段错误。
+症状有欺骗性：看起来像"崩溃测试没生效"，其实是符号名不对。
 

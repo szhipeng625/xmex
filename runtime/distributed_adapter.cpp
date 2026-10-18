@@ -308,5 +308,8 @@ xmex::Value kv_ffi_v(const xmex::Value* path) {
 xmex::Value kv_ffi_list_v() {
     return kv_ffi_list();
 }
+xmex::Value kv_ffi_isolated_v(const xmex::Value* path) {
+    return kv_ffi_isolated(path);
+}
 
 }  // extern "C"

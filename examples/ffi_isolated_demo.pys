@@ -1,0 +1,44 @@
+# ffi_isolated_demo.pys -- FFI isolated mode end-to-end demo
+#
+# Key point: **a crashing DLL does not kill the host**.
+# dll_crash dereferences a null pointer. In in-process mode that would
+# segfault the host too; in isolated mode only the child dies, the host
+# gets "worker crashed" and keeps running.
+#
+# Build:
+#   ./xmexc ffi_isolated_demo.pys -o ffi_isolated_demo.o -I ffi_isolated_demo
+# Link:
+#   g++ -std=c++20 ffi_main.cpp ffi_isolated_demo.o -o demo.exe \
+#       -I../include -L./bin -lxmex_runtime
+
+# ---- isolated mode ----
+lib = kv.ffi_isolated("./ffi_test_dll.dll")
+
+print("isolated symbols:", lib.symbols())
+print("isolated describe:", lib.describe("dll_add"))
+
+# normal calls -- same results as in-process mode
+r = lib.call("dll_add", [3, 4])
+print("isolated dll_add(3,4):", r)
+
+r = lib.call("dll_greet", ["world"])
+print("isolated dll_greet(world):", r)
+
+r = lib.call("dll_scale", [2.5, 4])
+print("isolated dll_scale(2.5,4):", r)
+
+# crash test -- the host survives this and keeps printing below
+r = lib.call("dll_crash", [])
+print("isolated dll_crash:", r)
+
+# the worker is dead now, further calls report it clearly
+r = lib.call("dll_add", [1, 2])
+print("after crash:", r)
+
+print("=== host is still alive, demo done ===")
+
+# ---- in-process mode for comparison ----
+inproc = kv.ffi("./ffi_test_dll.dll")
+print("inproc symbols:", inproc.symbols())
+r = inproc.call("dll_add", [10, 20])
+print("inproc dll_add(10,20):", r)

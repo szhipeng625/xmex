@@ -658,6 +658,17 @@ xmex::Value kv_failures(const xmex::Value *node_id);
 xmex::Value kv_ffi(const xmex::Value *path);
 xmex::Value kv_ffi_list();
 
+// kv.ffi_isolated(path) —— 把动态库加载到**子进程**。
+// DLL 崩溃/死循环时只有子进程死,宿主从管道读到 EOF,拿退出码报
+// "worker crashed",宿主本身不受影响。
+//
+// 与 kv.ffi 的取舍:
+//   kv.ffi         进程内加载。快,支持回调(回调是给 DLL 一个函数指针),
+//                  但 DLL 崩了宿主一起完蛋。
+//   kv.ffi_isolated 子进程加载。有隔离,协议与将来的远程 agent 一致,
+//                  但**不支持回调**,且参数要跨进程序列化。
+xmex::Value kv_ffi_isolated(const xmex::Value *path);
+
 // ---- 副本组(2026-10 增补) ----
 // 声明「这一组要几个副本」;成员不健康时调谐循环自动补足到期望副本数。
 // 参照 adviskv ReplicaGroup 设计。

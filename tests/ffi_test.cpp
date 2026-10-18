@@ -76,6 +76,7 @@ int main(int argc, char** argv) {
     check(syms.find("dll_greet") != std::string::npos, "列出了 dll_greet");
     check(syms.find("dll_scale") != std::string::npos, "列出了 dll_scale");
     check(syms.find("dll_fail") != std::string::npos, "列出了 dll_fail");
+    check(syms.find("dll_crash") != std::string::npos, "列出了 dll_crash");
 
     // ---- 3. 描述符:签名 ----
     std::printf("\n=== 3. 函数签名 ===\n");
@@ -159,7 +160,7 @@ int main(int argc, char** argv) {
     r = buf.data();
     std::printf("  ffi_list -> %s\n", r.c_str());
     check(contains(r, handle), "列表里能看到这个库");
-    check(contains(r, "\"functions\":5"), "列出了 5 个函数");
+    check(contains(r, "\"functions\":6"), "列出了 6 个函数");
     check(contains(r, "\"has_descriptor\":true"), "标记了有描述符");
 
     // ---- 7. 卸载 ----
