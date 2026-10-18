@@ -1,6 +1,6 @@
 // 分布式模块 xmex::Value 适配器
 // 将 xmex::Value* 参数转换为 const char* + int64_t 形式，
-// 使 raft/cluster/kv 模块的函数可以被 Xmex 内置模块调用机制使用。
+// 使 cluster/kv 模块的函数可以被 Xmex 内置模块调用机制使用。
 #include "xmex/runtime.h"
 #include "xmex/value.h"
 #include <cstring>
@@ -16,85 +16,10 @@ static int64_t strLen(const xmex::Value* v) {
 }
 // 底层 kv 接口前置声明
 extern "C" xmex::Value kv_persist(const char*, int64_t);
-// ====== Raft 适配器 ======
-extern "C" {
-
-xmex::Value raft_build_v(const xmex::Value* config) {
-    return raft_build(strPtr(config), strLen(config));
-}
-
-xmex::Value raft_erase_v(const xmex::Value* node_id) {
-    return raft_erase(strPtr(node_id), strLen(node_id));
-}
-
-xmex::Value raft_status_v(const xmex::Value* node_id) {
-    return raft_status(strPtr(node_id), strLen(node_id));
-}
-
-xmex::Value raft_list_nodes_v() {
-    return raft_list_nodes();
-}
-
-xmex::Value raft_add_v(const xmex::Value* node_id, const xmex::Value* cmd_type, const xmex::Value* payload) {
-    return raft_add(strPtr(node_id), strLen(node_id),
-                       strPtr(cmd_type), strLen(cmd_type),
-                       strPtr(payload), strLen(payload));
-}
-
-xmex::Value raft_register_handler_v(const xmex::Value* node_id, const xmex::Value* cmd_type) {
-    int64_t r = raft_register_handler(strPtr(node_id), strLen(node_id),
-                                          strPtr(cmd_type), strLen(cmd_type));
-    return int_(r);
-}
-
-xmex::Value raft_register_node_v(const xmex::Value* node_id, const xmex::Value* role, const xmex::Value* addr) {
-    return raft_register_node(strPtr(node_id), strLen(node_id),
-                                 strPtr(role), strLen(role),
-                                 strPtr(addr), strLen(addr));
-}
-
-xmex::Value raft_cluster_nodes_v(const xmex::Value* node_id) {
-    return raft_cluster_nodes(strPtr(node_id), strLen(node_id));
-}
-
-xmex::Value raft_mount_storage_v(const xmex::Value* node_id, const xmex::Value* name, const xmex::Value* path) {
-    return raft_mount_storage(strPtr(node_id), strLen(node_id),
-                                 strPtr(name), strLen(name),
-                                 strPtr(path), strLen(path));
-}
-
-xmex::Value raft_plugin_load_v(const xmex::Value* node_id, const xmex::Value* name, const xmex::Value* so_path) {
-    return raft_plugin_load(strPtr(node_id), strLen(node_id),
-                               strPtr(name), strLen(name),
-                               strPtr(so_path), strLen(so_path));
-}
-
-xmex::Value raft_plugin_unload_v(const xmex::Value* node_id, const xmex::Value* name) {
-    return raft_plugin_unload(strPtr(node_id), strLen(node_id),
-                                 strPtr(name), strLen(name));
-}
-
-xmex::Value raft_plugin_list_v(const xmex::Value* node_id) {
-    return raft_plugin_list(strPtr(node_id), strLen(node_id));
-}
-
-// ====== 分布式便捷内建适配器(2026-10 增补) ======
-xmex::Value raft_leader_info_v(const xmex::Value* node_id) {
-    return raft_leader_info(strPtr(node_id), strLen(node_id));
-}
-xmex::Value raft_send_v(const xmex::Value* node_id, const xmex::Value* msg) {
-    return raft_send(strPtr(node_id), strLen(node_id),
-                        strPtr(msg), strLen(msg));
-}
-xmex::Value raft_recv_v(const xmex::Value* node_id) {
-    return raft_recv(strPtr(node_id), strLen(node_id));
-}
-
-}  // extern "C"
 
 #ifndef _WIN32
 // cluster / kv 的适配器依赖 cluster_api.cpp 与 kv_admin_api.cpp —— 那两个用了
-// POSIX 网络与 fork,只在 Linux 构建里。raft 那一段是自足的,两个平台都编。
+// POSIX 网络与 fork,只在 Linux 构建里。
 
 extern "C" {
 

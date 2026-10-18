@@ -526,45 +526,6 @@ xmex::Value sysmon_sys_info();
 // 系统负载（1/5/15 分钟）
 xmex::Value sysmon_load_avg();
 
-// --- Raft 分布式框架 ------------------------------------------------------
-// 基于 Raft 共识算法的分布式集群管理：节点生命周期、状态机命令、
-// 节点注册、动态插件加载。所有接口返回 JSON 字符串。
-
-// 构建并启动 Raft 节点（config_json 含 node_id/bind_addr/peers 等）
-xmex::Value raft_build(const char *config_json, int64_t jsonLen);
-// 删除指定节点
-xmex::Value raft_erase(const char *node_id, int64_t idLen);
-// 获取节点状态（角色/任期/leader/提交索引等）
-xmex::Value raft_status(const char *node_id, int64_t idLen);
-// 列出所有本地节点 ID
-xmex::Value raft_list_nodes();
-// 提交命令到集群（仅 leader 可提交，follower 自动转发）
-xmex::Value raft_add(const char *node_id, int64_t idLen,
-                    const char *cmd_type, int64_t typeLen,
-                    const char *payload, int64_t payloadLen);
-// 注册命令处理器
-int64_t raft_register_handler(const char *node_id, int64_t idLen,
-                                  const char *cmd_type, int64_t typeLen);
-// 注册节点角色
-xmex::Value raft_register_node(const char *node_id, int64_t idLen,
-                               const char *role, int64_t roleLen,
-                               const char *addr, int64_t addrLen);
-// 获取集群节点列表
-xmex::Value raft_cluster_nodes(const char *node_id, int64_t idLen);
-// 注册共享存储
-xmex::Value raft_mount_storage(const char *node_id, int64_t idLen,
-                               const char *name, int64_t nameLen,
-                               const char *path, int64_t pathLen);
-// 加载动态插件（集群同步）
-xmex::Value raft_plugin_load(const char *node_id, int64_t idLen,
-                             const char *name, int64_t nameLen,
-                             const char *so_path, int64_t pathLen);
-// 卸载插件
-xmex::Value raft_plugin_unload(const char *node_id, int64_t idLen,
-                               const char *name, int64_t nameLen);
-// 列出已加载插件
-xmex::Value raft_plugin_list(const char *node_id, int64_t idLen);
-
 // --- 集群管理台 (cluster) -------------------------------------------------
 // 轻量级多集群管理控制台：通过指定远程地址连接多个独立集群，
 // 统一查看状态、执行命令、批量操作。管理台本身不运行 Raft 共识。
@@ -645,12 +606,6 @@ void sleep_ms(int64_t ms);
 // time_ms() / time_s():当前 Unix 时间戳(毫秒 / 秒)
 xmex::Value time_ms();
 xmex::Value time_s();
-// raft 选主查询:返回 {node_id,role,leader_id,is_leader,term}
-xmex::Value raft_leader_info(const char *node_id, int64_t idLen);
-// raft 消息收件箱:send 入队 / recv 出队(空返回空串)
-xmex::Value raft_send(const char *node_id, int64_t idLen,
-                     const char *msg, int64_t msgLen);
-xmex::Value raft_recv(const char *node_id, int64_t idLen);
 
 // ---- add(box) 统一编排与容器内定位(2026-10 增补) ----
 // kv.add_box(node_id, box, addr):一步完成注册节点+绑定盒子,addr 空则本地启动

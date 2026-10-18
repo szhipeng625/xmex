@@ -66,12 +66,9 @@ set(XMEX_RUNTIME_SOURCES
   runtime/concurrency.cpp
   runtime/object.cpp
   runtime/trace.cpp
-  # raft 的三件是自足的:raft.cpp 不用 socket(选举是模拟的),raft_api.cpp 只依赖
-  # raft.h + py_str_new + py_trace_*。distributed_adapter.cpp 里 raft 那一段同理;
-  # 它自己的 cluster/kv 适配器段带 _WIN32 守卫(依赖被排除的那两个实现)。
-  # 真正必须留在 Linux 的是下游的 server.cpp 与 cluster_api/kv_admin_api.cpp。
-  runtime/raft.cpp
-  runtime/raft_api.cpp
+  # distributed_adapter.cpp 是纯适配层：cluster/kv 段带 _WIN32 守卫（依赖只在
+  # Linux 构建的 cluster_api / kv_admin_api.cpp）。自研 raft 已于 2026-10 移除，
+  # 理由与后续方案见 docs/raft-removal.md。
   runtime/distributed_adapter.cpp
 )
 

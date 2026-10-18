@@ -22,7 +22,10 @@
 #include <atomic>
 #include <sstream>
 
-extern "C" xmex::Value raft_send(const char*, int64_t, const char*, int64_t);
+// 指令转发走节点内置 MQ(Redis LPUSH)。自研 raft 已移除,原先的 raft_send
+// 是一个纯内存收件箱,进程一退消息即丢;换 MQ 后指令有持久落点,
+// 被纳管的 adviskv 节点从队列取指令。详见 docs/raft-removal.md。
+extern "C" xmex::Value kv_enqueue(const char*, int64_t, const char*, int64_t);
 extern "C" xmex::Value kv_build(const char*, int64_t, const char*, int64_t, const char*, int64_t, const char*, int64_t, const char*, int64_t);
 
 // ---- TLS 支持(跨机通信加密,2026-10 增补) ----
@@ -73,7 +76,7 @@ namespace {
 std::atomic<bool> g_serverRunning{false};
 int g_serverPort = 8080;
 std::thread g_serverThread;
-// 集群通信配置:/exec 端点校验 Bearer 密钥,消息投递到本节点 raft 收件箱
+// 集群通信配置:/exec 端点校验 Bearer 密钥,消息投递到本节点 MQ 队列
 std::string g_clusterSecret;
 std::string g_nodeId;
 
@@ -252,7 +255,7 @@ void handleRequest(SSL *ssl, int clientFd) {
     close(clientFd);
     return;
   }
-  // 集群命令端点:对端 cluster.exec 发来的消息落进本节点 raft 收件箱
+  // 集群命令端点:对端 cluster.exec 发来的消息投进本节点 MQ 队列
   if (request.find("POST /exec") == 0) {
     std::string auth;
     size_t ap = request.find("Authorization: Bearer ");
@@ -292,8 +295,10 @@ void handleRequest(SSL *ssl, int clientFd) {
       close(clientFd);
       return;
     }
+    // 非 start_node 的指令:投进该节点的 MQ 队列,由节点自己取走执行。
+    // 队列名用节点 id,配合 kv.persist() 配置的同一后端。
     std::string msg = "{\"type\":\"" + cmdType + "\",\"payload\":" + payload + "}";
-    raft_send(nid.c_str(), nid.size(), msg.c_str(), msg.size());
+    kv_enqueue(nid.c_str(), nid.size(), msg.c_str(), msg.size());
     std::string body = "{\"received\":true,\"node\":\"" + nid + "\"}";
     std::string response = buildHttpResponse(200, body);
     tlsSend(ssl, response.c_str(), response.size());

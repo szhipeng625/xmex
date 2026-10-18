@@ -523,25 +523,6 @@ static const char *builtinModulePrefix(const std::string &mod, const std::string
     if (fn == "exec") return "sandbox_exec_v";
     if (fn == "destroy") return "sandbox_destroy_v";
   }
-  // Raft 分布式共识模块（通过 _v 适配器接收 xmex::Value* 参数）
-  if (mod == "raft") {
-    if (fn == "build") return "raft_build_v";
-    if (fn == "erase") return "raft_erase_v";
-    if (fn == "status") return "raft_status_v";
-    if (fn == "list_nodes") return "raft_list_nodes_v";
-    if (fn == "add") return "raft_add_v";
-    if (fn == "register_handler") return "raft_register_handler_v";
-    if (fn == "register_node") return "raft_register_node_v";
-    if (fn == "cluster_nodes") return "raft_cluster_nodes_v";
-    if (fn == "mount_storage") return "raft_mount_storage_v";
-    if (fn == "plugin_load") return "raft_plugin_load_v";
-    if (fn == "plugin_unload") return "raft_plugin_unload_v";
-    if (fn == "plugin_list") return "raft_plugin_list_v";
-    if (fn == "leader_info") return "raft_leader_info_v";
-    if (fn == "send") return "raft_send_v";
-    if (fn == "recv") return "raft_recv_v";
-  }
-  // Cluster 集群管理模块（通过 _v 适配器接收 xmex::Value* 参数）
   if (mod == "cluster") {
     if (fn == "connect") return "cluster_connect_v";
     if (fn == "disconnect") return "cluster_disconnect_v";
