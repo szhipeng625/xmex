@@ -24,11 +24,11 @@ int main(int argc, char **argv) {
   buf << in.rdbuf();
 
   try {
-    pylite::Lexer lexer(buf.str(), argv[1]);
-    pylite::Parser parser(lexer.tokenize(), argv[1]);
+    xmex::Lexer lexer(buf.str(), argv[1]);
+    xmex::Parser parser(lexer.tokenize(), argv[1]);
     auto mod = parser.parseModule();
     mod->dump(std::cout);
-  } catch (const pylite::SourceError &e) {
+  } catch (const xmex::SourceError &e) {
     std::fprintf(stderr, "%s\n", e.what());
     return 1;
   }

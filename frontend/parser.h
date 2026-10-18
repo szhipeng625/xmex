@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-namespace pylite {
+namespace xmex {
 
 class Parser {
  public:
@@ -84,4 +84,4 @@ class Parser {
   size_t pos_ = 0;
 };
 
-}  // namespace pylite
+}  // namespace xmex

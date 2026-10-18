@@ -1,5 +1,5 @@
 #include "cluster.h"
-#include "../include/pylite/runtime.h"
+#include "../include/xmex/runtime.h"
 #include <cstring>
 #include <sstream>
 
@@ -18,7 +18,7 @@ extern "C" {
 // ============================================================================
 
 // cluster.connect(name, addr, secret) → 连接到远程集群
-lite::Value cluster_connect(const char *name, int64_t nameLen,
+xmex::Value cluster_connect(const char *name, int64_t nameLen,
                             const char *addr, int64_t addrLen,
                             const char *secret, int64_t secretLen) {
     std::string n(name, nameLen);
@@ -38,7 +38,7 @@ lite::Value cluster_connect(const char *name, int64_t nameLen,
 }
 
 // cluster.disconnect(name) → 断开集群连接
-lite::Value cluster_disconnect(const char *name, int64_t nameLen) {
+xmex::Value cluster_disconnect(const char *name, int64_t nameLen) {
     std::string n(name, nameLen);
     bool ok = ClusterManager::instance().disconnect(n);
 
@@ -49,7 +49,7 @@ lite::Value cluster_disconnect(const char *name, int64_t nameLen) {
 }
 
 // cluster.list() → 列出所有已连接集群
-lite::Value cluster_list() {
+xmex::Value cluster_list() {
     auto clusters = ClusterManager::instance().list_clusters();
     std::ostringstream json;
     json << "[";
@@ -73,7 +73,7 @@ int64_t cluster_is_connected(const char *name, int64_t nameLen) {
 // ============================================================================
 
 // cluster.status(name) → 获取集群状态 JSON
-lite::Value cluster_status(const char *name, int64_t nameLen) {
+xmex::Value cluster_status(const char *name, int64_t nameLen) {
     std::string n(name, nameLen);
     auto st = ClusterManager::instance().get_status(n);
 
@@ -105,7 +105,7 @@ lite::Value cluster_status(const char *name, int64_t nameLen) {
 }
 
 // cluster.nodes(name) → 获取集群节点列表 JSON
-lite::Value cluster_nodes(const char *name, int64_t nameLen) {
+xmex::Value cluster_nodes(const char *name, int64_t nameLen) {
     std::string n(name, nameLen);
     auto nodes = ClusterManager::instance().get_nodes(n);
 
@@ -136,7 +136,7 @@ int64_t cluster_health(const char *name, int64_t nameLen) {
 // ============================================================================
 
 // cluster.exec(name, cmd_type, payload) → 向集群发送命令
-lite::Value cluster_exec(const char *name, int64_t nameLen,
+xmex::Value cluster_exec(const char *name, int64_t nameLen,
                          const char *cmd_type, int64_t typeLen,
                          const char *payload, int64_t payloadLen) {
     std::string n(name, nameLen);
@@ -162,7 +162,7 @@ lite::Value cluster_exec(const char *name, int64_t nameLen,
 }
 
 // cluster.query(name, path) → 向集群发送 GET 请求
-lite::Value cluster_query(const char *name, int64_t nameLen,
+xmex::Value cluster_query(const char *name, int64_t nameLen,
                           const char *path, int64_t pathLen) {
     std::string n(name, nameLen);
     std::string p(path, pathLen);
@@ -188,7 +188,7 @@ lite::Value cluster_query(const char *name, int64_t nameLen,
 // ============================================================================
 
 // cluster.broadcast(cmd_type, payload) → 向所有集群广播命令
-lite::Value cluster_broadcast(const char *cmd_type, int64_t typeLen,
+xmex::Value cluster_broadcast(const char *cmd_type, int64_t typeLen,
                               const char *payload, int64_t payloadLen) {
     std::string t(cmd_type, typeLen);
     std::string p(payload, payloadLen);
@@ -215,7 +215,7 @@ lite::Value cluster_broadcast(const char *cmd_type, int64_t typeLen,
 }
 
 // cluster.health_all() → 所有集群健康检查
-lite::Value cluster_health_all() {
+xmex::Value cluster_health_all() {
     auto results = ClusterManager::instance().health_check_all();
 
     std::ostringstream json;

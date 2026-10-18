@@ -13,7 +13,7 @@
 //   {"type":"vars","vars":{"x":42,"y":"hello"}}
 //   {"type":"error","msg":"something went wrong"}
 
-#include "pylite/runtime.h"
+#include "xmex/runtime.h"
 
 #include <chrono>
 #ifndef _WIN32
@@ -372,7 +372,7 @@ extern "C" int64_t trace_begin(const char *name) {
 // paramNames 是形参名数组,paramValues 是各实参值指针数组。
 extern "C" int64_t trace_begin_args(const char *name, int count,
                                        const char *const *paramNames,
-                                       const lite::Value *const *paramValues) {
+                                       const xmex::Value *const *paramValues) {
   if (!g_traceEnabled || name == nullptr) return 0;
   traceLock();
   int64_t id = g_nextId++;
@@ -394,8 +394,8 @@ extern "C" int64_t trace_begin_args(const char *name, int count,
     display += "=";
     const char *text = "None";
     if (paramValues && paramValues[i] != nullptr) {
-      lite::Value r = repr(paramValues[i]);
-      if (r.tag == lite::kStr) text = str_data(&r);
+      xmex::Value r = repr(paramValues[i]);
+      if (r.tag == xmex::kStr) text = str_data(&r);
     }
     display += text;
   }
@@ -458,12 +458,12 @@ extern "C" int32_t trace_enabled() {
 
 // 直接收『变量名 + 值指针』的上报接口。值的文本化在这里完成(用运行时的 repr),
 // 编译器侧不用关心字符串怎么取、怎么保证 NUL 结尾 —— 全部收敛到这一个入口。
-extern "C" void trace_var_value(const char *name, const lite::Value *v) {
+extern "C" void trace_var_value(const char *name, const xmex::Value *v) {
   if (!g_traceEnabled || name == nullptr) return;
   const char *text = "None";
   if (v != nullptr) {
-    lite::Value r = repr(v);
-    if (r.tag == lite::kStr) text = str_data(&r);
+    xmex::Value r = repr(v);
+    if (r.tag == xmex::kStr) text = str_data(&r);
   }
   // ⚠️ text 指向的字符串对象在这之后不能再触发分配:jsonStr / pushEvent 都不走
   // 堆对象分配,所以指针在本函数内始终有效。

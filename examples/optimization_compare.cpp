@@ -1,10 +1,10 @@
 // DeepSeek-R1-14B-AWQ 优化前后对比分析
 //
 // 编译方式：
-//   g++ -std=c++17 -I../include -L../build/bin -lpylite_runtime \
+//   g++ -std=c++17 -I../include -L../build/bin -lxmex_runtime \
 //       -Wl,-rpath,../build/bin -o opt_compare optimization_compare.cpp
 
-#include "pylite/api.h"
+#include "xmex/api.h"
 
 #include <iostream>
 #include <iomanip>
@@ -274,7 +274,7 @@ int main() {
     // GPU 信息
     std::cout << "\n" << std::string(80, '=') << "\n";
     std::cout << "  DeepSeek-R1-14B-AWQ 优化前后对比分析\n";
-    std::cout << "  GPU: " << pylite::cuda::info() << "\n";
+    std::cout << "  GPU: " << xmex::cuda::info() << "\n";
     std::cout << std::string(80, '=') << "\n";
 
     // =======================================================================

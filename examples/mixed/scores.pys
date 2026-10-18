@@ -1,9 +1,9 @@
-# PyLite 侧 —— 只写业务逻辑,不碰 I/O。
+# Xmex 侧 —— 只写业务逻辑,不碰 I/O。
 #
-# 这个模块被 pylitec 编译成 scores.o,由同目录的 main.cpp 链接调用。
-# 符号命名规则是 pylite_<模块名>_<函数名>,模块名取主文件名(scores)。
+# 这个模块被 xmexc 编译成 scores.o,由同目录的 main.cpp 链接调用。
+# 符号命名规则是 xmex_<模块名>_<函数名>,模块名取主文件名(scores)。
 
-# 顶层语句会被编译进 pylite_scores_main(),C++ 调它时执行。
+# 顶层语句会被编译进 xmex_scores_main(),C++ 调它时执行。
 # 顶层可以做初始化,但这里刻意什么都不留 —— 因为 GC 只把**栈上**的引用
 # 当作根,顶层语句里的局部变量在 main 返回后就没了。
 print("[pys] scores.pys 顶层执行")

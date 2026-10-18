@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
-project(PyLite LANGUAGES C CXX)
+project(Xmex LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Linux 上 ld 默认 --as-needed，会把 .o 之前出现的 .so 跳过，
-# 导致 pylitec 产出的 .o 找不到运行时符号。强制 --no-as-needed。
+# 导致 xmexc 产出的 .o 找不到运行时符号。强制 --no-as-needed。
 if(UNIX AND NOT APPLE)
   add_link_options(-Wl,--no-as-needed)
 endif()
@@ -37,7 +37,7 @@ add_compile_options(${LLVM_DEFINITIONS_LIST})
 # 内置分布式项目 adviskv（作为子项目接入构建）
 # ---------------------------------------------------------------------------
 # 仅 Linux 构建接入:adviskv 是 Linux/vcpkg 项目,Windows 上子模块不可用,
-# 且没有任何 PyLite 源码引用它的符号。
+# 且没有任何 Xmex 源码引用它的符号。
 if(NOT WIN32)
   set(VCPKG_INSTALLED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/adviskv/.adviskv_deps/vcpkg/installed" CACHE PATH "adviskv vcpkg installed dir")
   list(PREPEND CMAKE_PREFIX_PATH "${VCPKG_INSTALLED_DIR}/x64-linux")
@@ -46,7 +46,7 @@ if(NOT WIN32)
 endif()
 
 # 核心运行时:跨平台,两个平台都编。
-set(PYLITE_RUNTIME_SOURCES
+set(XMEX_RUNTIME_SOURCES
   runtime/error.cpp
   runtime/gc.cpp
   runtime/arith.cpp
@@ -82,7 +82,7 @@ set(PYLITE_RUNTIME_SOURCES
 # 适配层自己语法干净,但符号定义在上面那些文件里,拆开就会链接失败,
 # 所以必须成组进出。
 if(NOT WIN32)
-  list(APPEND PYLITE_RUNTIME_SOURCES
+  list(APPEND XMEX_RUNTIME_SOURCES
     runtime/cuda.cpp
     runtime/server.cpp
     runtime/engine.cpp
@@ -102,8 +102,8 @@ if(NOT WIN32)
   )
 endif()
 
-add_library(pylite_runtime SHARED ${PYLITE_RUNTIME_SOURCES})
-target_include_directories(pylite_runtime PUBLIC
+add_library(xmex_runtime SHARED ${XMEX_RUNTIME_SOURCES})
+target_include_directories(xmex_runtime PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
 if(WIN32)
@@ -111,17 +111,17 @@ if(WIN32)
   # closesocket/gethostname)。trace.cpp 里的 #pragma comment(lib, "ws2_32.lib")
   # 只对 MSVC 生效,MinGW 会直接忽略 —— 必须在这里显式链接,
   # 否则与 trace 是否被调用无关,链接期就是一堆 undefined reference。
-  target_link_libraries(pylite_runtime PRIVATE ws2_32)
+  target_link_libraries(xmex_runtime PRIVATE ws2_32)
 else()
   # Linux 上 GCC 默认隐藏符号，需要显式设置默认可见性以匹配 MinGW 行为
-  target_compile_options(pylite_runtime PRIVATE -fvisibility=default)
+  target_compile_options(xmex_runtime PRIVATE -fvisibility=default)
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(SECCOMP REQUIRED libseccomp)
-  target_include_directories(pylite_runtime PRIVATE ${SECCOMP_INCLUDE_DIRS})
+  target_include_directories(xmex_runtime PRIVATE ${SECCOMP_INCLUDE_DIRS})
   find_package(OpenSSL REQUIRED)
   # OpenSSL / seccomp 使用静态库内置，与 adviskv 内 gRPC 静态组保持一致，
   # 避免同一符号同时从动态库和静态库加载两份副本。
-  target_link_libraries(pylite_runtime PRIVATE pthread dl /usr/lib/x86_64-linux-gnu/libseccomp.a /usr/lib/x86_64-linux-gnu/libssl.a /usr/lib/x86_64-linux-gnu/libcrypto.a adviskv_storage_lib adviskv_catalog_lib adviskv_topo_lib adviskv_sdk)
+  target_link_libraries(xmex_runtime PRIVATE pthread dl /usr/lib/x86_64-linux-gnu/libseccomp.a /usr/lib/x86_64-linux-gnu/libssl.a /usr/lib/x86_64-linux-gnu/libcrypto.a adviskv_storage_lib adviskv_catalog_lib adviskv_topo_lib adviskv_sdk)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -129,64 +129,64 @@ endif()
 # ---------------------------------------------------------------------------
 # 刻意与 LLVM 完全解耦:前端可以用最朴素的方式构建和单元测试,
 # 报错也只可能是语言层面的问题,不会和 JIT/代码生成的坑混在一起。
-add_library(pylite_frontend STATIC
+add_library(xmex_frontend STATIC
   frontend/lexer.cpp
   frontend/ast.cpp
   frontend/parser.cpp
 )
-target_include_directories(pylite_frontend PUBLIC
+target_include_directories(xmex_frontend PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/frontend>
 )
 
 add_executable(lex_dump tests/lex_dump.cpp)
-target_link_libraries(lex_dump PRIVATE pylite_frontend)
+target_link_libraries(lex_dump PRIVATE xmex_frontend)
 
 add_executable(ast_dump tests/ast_dump.cpp)
-target_link_libraries(ast_dump PRIVATE pylite_frontend)
+target_link_libraries(ast_dump PRIVATE xmex_frontend)
 
 add_executable(frontend_test tests/frontend_test.cpp)
-target_link_libraries(frontend_test PRIVATE pylite_frontend)
+target_link_libraries(frontend_test PRIVATE xmex_frontend)
 
 # ---------------------------------------------------------------------------
 # 代码生成(依赖 LLVM)
 # ---------------------------------------------------------------------------
 # irgen 与 aot 放同一个库里:两者都直接用 LLVM C++ API,且共享
 # kTargetTriple / initializeCodeGenTargets 这些必须成对出现的约定。
-add_library(pylite_irgen STATIC
+add_library(xmex_irgen STATIC
   irgen/abi.cpp
   irgen/irgen.cpp
   aot/compiler.cpp
 )
 # 公开项目根目录与 include/:irgen 的源文件会 include "frontend/lexer.h"
-# 和 "pylite/value.h" 这种路径
-target_include_directories(pylite_irgen PUBLIC
+# 和 "xmex/value.h" 这种路径
+target_include_directories(xmex_irgen PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   ${LLVM_INCLUDE_DIRS}
 )
-target_link_libraries(pylite_irgen PUBLIC pylite_frontend LLVM)
+target_link_libraries(xmex_irgen PUBLIC xmex_frontend LLVM)
 
-add_executable(pylitec tools/pylitec.cpp)
-target_link_libraries(pylitec PRIVATE pylite_irgen)
+add_executable(xmexc tools/xmexc.cpp)
+target_link_libraries(xmexc PRIVATE xmex_irgen)
 
 # ---------------------------------------------------------------------------
 # Stage 0 验证
 # ---------------------------------------------------------------------------
 add_executable(abi_test tests/abi_test.cpp)
-target_link_libraries(abi_test PRIVATE pylite_runtime)
+target_link_libraries(abi_test PRIVATE xmex_runtime)
 
 # 运行时语义的直接测试(不经过 IRGen)。放在这一层是为了让 e2e 失败时
 # 能立刻排除"运行时算错"这一整类原因。
 add_executable(runtime_test tests/runtime_test.cpp)
-target_link_libraries(runtime_test PRIVATE pylite_runtime)
+target_link_libraries(runtime_test PRIVATE xmex_runtime)
 
 # GC 专项测试:守恒律、真的回收了、不误回收、环。
 add_executable(gc_test tests/gc_test.cpp)
-target_link_libraries(gc_test PRIVATE pylite_runtime)
+target_link_libraries(gc_test PRIVATE xmex_runtime)
 
 add_executable(jit_spike tests/jit_spike.cpp)
 target_include_directories(jit_spike PRIVATE ${LLVM_INCLUDE_DIRS})
-target_link_libraries(jit_spike PRIVATE LLVM pylite_runtime)
+target_link_libraries(jit_spike PRIVATE LLVM xmex_runtime)
 
 # ---------------------------------------------------------------------------
 # 诊断工具:确认 LLVM 目标注册表状态(非测试,出问题时手动跑)
@@ -202,7 +202,7 @@ enable_testing()
 add_test(NAME abi_test COMMAND abi_test)
 # 显式把运行时库的全路径传进去:JIT 要按名字加载它解析 py_* 符号,
 # 不传的话就得靠默认文件名猜(Windows 是 .dll、Linux 是 .so)。
-add_test(NAME jit_spike COMMAND jit_spike $<TARGET_FILE:pylite_runtime>)
+add_test(NAME jit_spike COMMAND jit_spike $<TARGET_FILE:xmex_runtime>)
 add_test(NAME frontend_test COMMAND frontend_test)
 add_test(NAME runtime_test COMMAND runtime_test)
 add_test(NAME gc_test COMMAND gc_test)
@@ -217,7 +217,7 @@ endforeach()
 # ---------------------------------------------------------------------------
 # 端到端测试:.pys -> 目标文件 -> 与 C++ 链接 -> 运行 -> 比对 stdout
 # ---------------------------------------------------------------------------
-# 每个用例配一个最小的 C++ 驱动,它只做一件事:调用 pylitec 编译出来的入口。
+# 每个用例配一个最小的 C++ 驱动,它只做一件事:调用 xmexc 编译出来的入口。
 # 这一层验证的正是项目的核心诉求 —— "在编译期集成进 C++"。
 # 只做 AST 层面的检查是不够的:之前 print(a, b) 的 GEP 语义写错时,
 # IR 验证通过、编译成功、链接成功,只有真正运行才暴露出来。
@@ -243,20 +243,20 @@ set(E2E_CASES
   while_ctl
 )
 
-# 手写 C++ 链接 pylitec 产物的集成测试。tests/linktest/ 一直都在,但之前只有
-# 手工步骤;接进 CTest 之后,项目的核心诉求 —— "把 PyLite 编译进 C++ 程序" ——
+# 手写 C++ 链接 xmexc 产物的集成测试。tests/linktest/ 一直都在,但之前只有
+# 手工步骤;接进 CTest 之后,项目的核心诉求 —— "把 Xmex 编译进 C++ 程序" ——
 # 每次构建都会被真正验证一次。
 set(LINKTEST_OBJ ${CMAKE_CURRENT_BINARY_DIR}/linktest/arith.o)
 add_custom_command(
   OUTPUT ${LINKTEST_OBJ}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/linktest
-  COMMAND pylitec ${CMAKE_CURRENT_SOURCE_DIR}/tests/linktest/arith.pys
+  COMMAND xmexc ${CMAKE_CURRENT_SOURCE_DIR}/tests/linktest/arith.pys
           -o ${LINKTEST_OBJ}
-  DEPENDS pylitec ${CMAKE_CURRENT_SOURCE_DIR}/tests/linktest/arith.pys
-  COMMENT "pylitec linktest/arith.pys")
+  DEPENDS xmexc ${CMAKE_CURRENT_SOURCE_DIR}/tests/linktest/arith.pys
+  COMMENT "xmexc linktest/arith.pys")
 
 add_executable(linktest tests/linktest/main.cpp ${LINKTEST_OBJ})
-target_link_libraries(linktest PRIVATE pylite_runtime)
+target_link_libraries(linktest PRIVATE xmex_runtime)
 
 add_test(NAME linktest
          COMMAND ${CMAKE_COMMAND}
@@ -265,9 +265,9 @@ add_test(NAME linktest
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/compare_output.cmake)
 
 # ---------------------------------------------------------------------------
-# 混合语言示例:C++ 宿主 + PyLite 业务逻辑
+# 混合语言示例:C++ 宿主 + Xmex 业务逻辑
 # ---------------------------------------------------------------------------
-# examples/mixed/ 是给人看的一个完整例子(C++ 造数据、PyLite 算、C++ 收结果),
+# examples/mixed/ 是给人看的一个完整例子(C++ 造数据、Xmex 算、C++ 收结果),
 # 文档在同目录的 README.md。这里把它接进构建,保证它随时可编译可链接。
 #
 # 只断言"退出码为 0",不比对 stdout:它的输出是给人看的中文,
@@ -276,13 +276,13 @@ set(MIXED_OBJ ${CMAKE_CURRENT_BINARY_DIR}/mixed/scores.o)
 add_custom_command(
   OUTPUT ${MIXED_OBJ}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/mixed
-  COMMAND pylitec ${CMAKE_CURRENT_SOURCE_DIR}/examples/mixed/scores.pys
+  COMMAND xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/mixed/scores.pys
           -o ${MIXED_OBJ}
-  DEPENDS pylitec ${CMAKE_CURRENT_SOURCE_DIR}/examples/mixed/scores.pys
-  COMMENT "pylitec mixed/scores.pys")
+  DEPENDS xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/mixed/scores.pys
+  COMMENT "xmexc mixed/scores.pys")
 
 add_executable(mixed_demo examples/mixed/main.cpp ${MIXED_OBJ})
-target_link_libraries(mixed_demo PRIVATE pylite_runtime)
+target_link_libraries(mixed_demo PRIVATE xmex_runtime)
 
 add_test(NAME mixed_demo COMMAND mixed_demo)
 
@@ -295,18 +295,18 @@ foreach(t ${E2E_CASES})
 
   # 驱动源码:唯一的职责就是把编译产物调起来
   file(WRITE ${drv}
-    "extern \"C\" void pylite_${t}_main();\n"
-    "int main() { pylite_${t}_main(); return 0; }\n")
+    "extern \"C\" void xmex_${t}_main();\n"
+    "int main() { xmex_${t}_main(); return 0; }\n")
 
   add_custom_command(
     OUTPUT ${obj}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/e2e
-    COMMAND pylitec ${pys} -o ${obj}
-    DEPENDS pylitec ${pys}
-    COMMENT "pylitec ${t}.pys")
+    COMMAND xmexc ${pys} -o ${obj}
+    DEPENDS xmexc ${pys}
+    COMMENT "xmexc ${t}.pys")
 
   add_executable(e2e_${t} ${drv} ${obj})
-  target_link_libraries(e2e_${t} PRIVATE pylite_runtime)
+  target_link_libraries(e2e_${t} PRIVATE xmex_runtime)
 
   # 有同名 .in 文件时,把它作为 stdin 喂给程序(测 input(...) 的用例)
   set(inputArg)
@@ -332,5 +332,5 @@ foreach(t ${E2E_CASES})
                    ${inputArg}
                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/compare_output.cmake)
   set_tests_properties(e2e_${t}_gc PROPERTIES
-                       ENVIRONMENT "PYLITE_GC_STRESS=1")
+                       ENVIRONMENT "XMEX_GC_STRESS=1")
 endforeach()

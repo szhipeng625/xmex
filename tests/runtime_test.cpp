@@ -6,7 +6,7 @@
 //
 // 断言几乎都拿 repr 的文本结果来比 —— 好处是期望值写出来就是
 // "['a', 1]" 这种能直接读的东西,而且顺带把 repr 本身也测了。
-#include "pylite/runtime.h"
+#include "xmex/runtime.h"
 
 #include <cstdio>
 #include <string>
@@ -26,12 +26,12 @@ void check(bool cond, const std::string &what) {
 }
 
 // 按 repr 规则渲染,期望值直接写成文本
-std::string rep(lite::Value v) {
-  lite::Value s = repr(&v);
+std::string rep(xmex::Value v) {
+  xmex::Value s = repr(&v);
   return std::string(str_data(&s), static_cast<size_t>(str_size(&s)));
 }
 
-void checkRep(lite::Value v, const std::string &want, const std::string &what) {
+void checkRep(xmex::Value v, const std::string &want, const std::string &what) {
   const std::string got = rep(v);
   if (got == want) {
     std::printf("  [ok]   %s → %s\n", what.c_str(), got.c_str());
@@ -52,20 +52,20 @@ void checkInt(int64_t got, int64_t want, const std::string &what) {
   }
 }
 
-lite::Value str(const char *s) {
+xmex::Value str(const char *s) {
   return str_new(s, static_cast<int64_t>(std::char_traits<char>::length(s)));
 }
 
-lite::Value list(std::initializer_list<lite::Value> xs) {
-  return list_new(const_cast<lite::Value *>(xs.begin()),
+xmex::Value list(std::initializer_list<xmex::Value> xs) {
+  return list_new(const_cast<xmex::Value *>(xs.begin()),
                      static_cast<int64_t>(xs.size()));
 }
 
 // 按 {k0, v0, k1, v1, ...} 写,内部拆成 dict_new 要的两条平行数组
-lite::Value dict(std::initializer_list<lite::Value> kvs) {
-  const std::vector<lite::Value> v(kvs);
+xmex::Value dict(std::initializer_list<xmex::Value> kvs) {
+  const std::vector<xmex::Value> v(kvs);
   const int64_t n = static_cast<int64_t>(v.size() / 2);
-  std::vector<lite::Value> keys(static_cast<size_t>(n)), vals(static_cast<size_t>(n));
+  std::vector<xmex::Value> keys(static_cast<size_t>(n)), vals(static_cast<size_t>(n));
   for (int64_t i = 0; i < n; ++i) {
     keys[static_cast<size_t>(i)] = v[static_cast<size_t>(2 * i)];
     vals[static_cast<size_t>(i)] = v[static_cast<size_t>(2 * i + 1)];
@@ -73,18 +73,18 @@ lite::Value dict(std::initializer_list<lite::Value> kvs) {
   return dict_new(keys.data(), vals.data(), n);
 }
 
-lite::Value callMethod(lite::Value obj, const char *name, std::vector<lite::Value> args = {}) {
+xmex::Value callMethod(xmex::Value obj, const char *name, std::vector<xmex::Value> args = {}) {
   return call_method(&obj, name, static_cast<int64_t>(std::char_traits<char>::length(name)),
                         args.data(), static_cast<int64_t>(args.size()));
 }
 
-lite::Value idx(lite::Value obj, lite::Value i) { return index_(&obj, &i); }
+xmex::Value idx(xmex::Value obj, xmex::Value i) { return index_(&obj, &i); }
 
-lite::Value t_slice(lite::Value obj, lite::Value lo, lite::Value hi, lite::Value step) {
+xmex::Value t_slice(xmex::Value obj, xmex::Value lo, xmex::Value hi, xmex::Value step) {
   return slice(&obj, &lo, &hi, &step);
 }
 
-lite::Value none() { return none_(); }
+xmex::Value none() { return none_(); }
 
 }  // namespace
 
@@ -98,7 +98,7 @@ int main() {
   // ------------------------------------------------------------ 字符串
   std::printf("-- 字符串 --\n");
   {
-    lite::Value a = str("hello");
+    xmex::Value a = str("hello");
     checkInt(str_size(&a), 5, "str_size(\"hello\")");
     checkRep(str_get(&a, 1), "'e'", "s[1]");
     checkRep(str_get(&a, -1), "'o'", "s[-1](负索引从末尾数)");
@@ -106,39 +106,39 @@ int main() {
     checkRep(str_repeat(&a, 2), "'hellohello'", "s * 2");
     checkRep(str_repeat(&a, 0), "''", "s * 0");
 
-    lite::Value b = str("world");
+    xmex::Value b = str("world");
     checkInt(str_compare(&a, &b), -1, "\"hello\" < \"world\" 的符号");
     checkInt(str_compare(&a, &a), 0, "\"hello\" == \"hello\" 的符号");
 
     // 内嵌 '\0' 必须按长度处理,不能靠 C 字符串函数
-    lite::Value z = str_new("a\0b", 3);
+    xmex::Value z = str_new("a\0b", 3);
     checkInt(str_size(&z), 3, "含内嵌 NUL 的字符串长度是 3(不是 1)");
     checkRep(z, "'a\\x00b'", "含内嵌 NUL 的字符串 repr 会转义");
 
     checkInt(str_find(&a, &b, 0), -1, "\"hello\".find(\"world\") == -1");
-    lite::Value ell = str("ll");
+    xmex::Value ell = str("ll");
     checkInt(str_find(&a, &ell, 0), 2, "\"hello\".find(\"ll\") == 2");
     checkInt(str_starts_with(&a, &ell), 0, "\"hello\".startswith(\"ll\") 是假");
-    lite::Value he = str("he");
+    xmex::Value he = str("he");
     checkInt(str_starts_with(&a, &he), 1, "\"hello\".startswith(\"he\") 是真");
-    lite::Value lo2 = str("lo");
+    xmex::Value lo2 = str("lo");
     checkInt(str_ends_with(&a, &lo2), 1, "\"hello\".endswith(\"lo\") 是真");
   }
 
   // -------------------------------------------------------------- 列表
   std::printf("\n-- 列表 --\n");
   {
-    lite::Value xs = list({int_(1), int_(2), int_(3)});
+    xmex::Value xs = list({int_(1), int_(2), int_(3)});
     checkRep(xs, "[1, 2, 3]", "列表字面量 [1, 2, 3]");
     checkInt(list_len(&xs), 3, "len([1,2,3])");
     checkRep(list_get(&xs, 0), "1", "xs[0]");
     checkRep(list_get(&xs, -1), "3", "xs[-1]");
 
-    lite::Value four = int_(4);
+    xmex::Value four = int_(4);
     list_append(&xs, &four);
     checkRep(xs, "[1, 2, 3, 4]", "append(4) 就地生效");
 
-    lite::Value zero = int_(0);
+    xmex::Value zero = int_(0);
     list_insert(&xs, 0, &zero);
     checkRep(xs, "[0, 1, 2, 3, 4]", "insert(0, 0)");
 
@@ -148,25 +148,25 @@ int main() {
     checkInt(list_index(&xs, &four), 3, "xs.index(4) == 3");
     checkInt(list_count(&xs, &four), 1, "xs.count(4) == 1");
 
-    lite::Value popIdx = none_();  // None 表示"没给下标",弹末尾
-    lite::Value p = list_pop(&xs, &popIdx);
+    xmex::Value popIdx = none_();  // None 表示"没给下标",弹末尾
+    xmex::Value p = list_pop(&xs, &popIdx);
     checkRep(p, "4", "pop() 返回末尾元素");
     checkRep(xs, "[1, 2, 3]", "pop() 之后列表少一个");
 
     list_reverse(&xs);
     checkRep(xs, "[3, 2, 1]", "reverse()");
 
-    lite::Value unsorted = list({int_(3), int_(1), int_(2)});
+    xmex::Value unsorted = list({int_(3), int_(1), int_(2)});
     list_sort(&unsorted);
     checkRep(unsorted, "[1, 2, 3]", "sort() 数值升序");
 
     // 自拼接:必须是**就地** extend,而且不能在增长时把来源数组读飞
-    lite::Value self;
+    xmex::Value self;
     self = list({int_(1), int_(2)});
     list_extend(&self, &self);
     checkRep(self, "[1, 2, 1, 2]", "xs.extend(xs) 不读飞自己");
 
-    lite::Value two = list({int_(2)});
+    xmex::Value two = list({int_(2)});
     checkRep(list_concat(&two, &two), "[2, 2]", "[2] + [2] 是新列表");
     checkRep(list_repeat(&two, 3), "[2, 2, 2]", "[2] * 3");
   }
@@ -175,28 +175,28 @@ int main() {
   std::printf("\n-- 列表的可变语义(别名与 +=)--\n");
   {
     // a += [x] 是就地 extend,别名看得见 —— 与 a = a + [x] 不同
-    lite::Value a = list({int_(1)});
-    lite::Value alias = a;  // 同一个 lite::Value,指向同一个 lite::List
-    lite::Value b = list({int_(2)});
+    xmex::Value a = list({int_(1)});
+    xmex::Value alias = a;  // 同一个 xmex::Value,指向同一个 xmex::List
+    xmex::Value b = list({int_(2)});
 
-    lite::Value r = iadd(&a, &b);
+    xmex::Value r = iadd(&a, &b);
     checkRep(r, "[1, 2]", "a += b 的结果");
     checkRep(a, "[1, 2]", "a += b 之后 a");
     checkRep(alias, "[1, 2]",
              "别名也看到改动(就地语义,与 Python 的 list.__iadd__ 一致)");
 
     // 对照:a = a + b 走 add,是新列表,别名不受影响
-    lite::Value c = list({int_(1)});
-    lite::Value cAlias = c;
-    lite::Value d = list({int_(2)});
-    lite::Value sum = add(c, d);
+    xmex::Value c = list({int_(1)});
+    xmex::Value cAlias = c;
+    xmex::Value d = list({int_(2)});
+    xmex::Value sum = add(c, d);
     checkRep(sum, "[1, 2]", "a + b 的结果");
     checkRep(cAlias, "[1]", "a + b **不**影响别名(重新绑定语义)");
 
     // 字符串不可变:+= 不改动原对象所指
-    lite::Value s1 = str("ab");
-    lite::Value s2 = str("cd");
-    lite::Value s3 = iadd(&s1, &s2);
+    xmex::Value s1 = str("ab");
+    xmex::Value s2 = str("cd");
+    xmex::Value s3 = iadd(&s1, &s2);
     checkRep(s3, "'abcd'", "\"ab\" += \"cd\" 的结果");
     checkRep(s1, "'ab'", "字符串 += 不改原对象(不可变)");
   }
@@ -204,29 +204,29 @@ int main() {
   // -------------------------------------------------------------- 字典
   std::printf("\n-- 字典 --\n");
   {
-    lite::Value d = dict({str("a"), int_(1), str("b"), int_(2)});
+    xmex::Value d = dict({str("a"), int_(1), str("b"), int_(2)});
     checkRep(d, "{'a': 1, 'b': 2}", "字典字面量");
     checkInt(dict_len(&d), 2, "len({'a':1,'b':2})");
 
-    lite::Value ka = str("a");
+    xmex::Value ka = str("a");
     checkRep(dict_get(&d, &ka), "1", "d[\"a\"]");
     checkInt(dict_has(&d, &ka), 1, "\"a\" in d");
 
     // 键按**值**比较,不是按指针 —— 这是修掉 eq 之后才成立的行为
-    lite::Value ka2 = str("a");  // 另一个同内容字符串,指针不同
+    xmex::Value ka2 = str("a");  // 另一个同内容字符串,指针不同
     checkInt(dict_has(&d, &ka2), 1,
              "另一个同内容的 \"a\" 也能查到(键按值比较)");
 
-    lite::Value kc = str("c");
+    xmex::Value kc = str("c");
     checkInt(dict_has(&d, &kc), 0, "\"c\" in d 是假");
-    lite::Value fallback = int_(99);
+    xmex::Value fallback = int_(99);
     checkRep(dict_get_default(&d, &kc, &fallback), "99", "d.get(\"c\", 99)");
 
     // 重复键:值取后到的,位置取先到的
-    lite::Value dup = dict({str("a"), int_(1), str("b"), int_(2), str("a"), int_(3)});
+    xmex::Value dup = dict({str("a"), int_(1), str("b"), int_(2), str("a"), int_(3)});
     checkRep(dup, "{'a': 3, 'b': 2}", "重复键:值取后到、位置取先到");
 
-    lite::Value v9 = int_(9);
+    xmex::Value v9 = int_(9);
     dict_set(&d, &kc, &v9);
     checkRep(d, "{'a': 1, 'b': 2, 'c': 9}", "新键追加在末尾(插入有序)");
 
@@ -238,17 +238,17 @@ int main() {
   // ------------------------------------------------------- 下标 / 切片
   std::printf("\n-- 下标与切片 --\n");
   {
-    lite::Value xs = list({int_(1), int_(2), int_(3), int_(4), int_(5)});
+    xmex::Value xs = list({int_(1), int_(2), int_(3), int_(4), int_(5)});
     checkInt(len(&xs), 5, "len(列表)");
     checkRep(idx(xs, int_(1)), "2", "列表下标");
 
-    lite::Value t = tuple_new(nullptr, 0);
+    xmex::Value t = tuple_new(nullptr, 0);
     checkInt(len(&t), 0, "len(()) == 0");
 
-    lite::Value s = str("hello");
+    xmex::Value s = str("hello");
     checkInt(len(&s), 5, "len(字符串)");
 
-    lite::Value d = dict({str("k"), int_(7)});
+    xmex::Value d = dict({str("k"), int_(7)});
     checkRep(idx(d, str("k")), "7", "字典按键下标");
     checkRep(iter_at(&d, 0), "'k'",
              "遍历字典产出的是**键**(不是 d[0] 那种按键查找)");
@@ -262,8 +262,8 @@ int main() {
     checkRep(t_slice(s, none(), none(), int_(-1)), "'olleh'", "\"hello\"[::-1]");
     // 切片保持原类型:列表切出列表,元组切出元组
     checkRep(t_slice(xs, int_(0), int_(2), none()), "[1, 2]", "列表切片得到列表");
-    lite::Value tupElems[3] = {int_(1), int_(2), int_(3)};
-    lite::Value tup3 = tuple_new(tupElems, 3);
+    xmex::Value tupElems[3] = {int_(1), int_(2), int_(3)};
+    xmex::Value tup3 = tuple_new(tupElems, 3);
     checkRep(t_slice(tup3, none(), none(), none()), "(1, 2, 3)",
              "元组切片得到元组");
   }
@@ -271,7 +271,7 @@ int main() {
   // -------------------------------------------------------------- 方法
   std::printf("\n-- 方法 --\n");
   {
-    lite::Value s = str("  Hello World  ");
+    xmex::Value s = str("  Hello World  ");
     checkRep(callMethod(s, "strip"), "'Hello World'", "strip()");
     checkRep(callMethod(s, "strip", {str(" ")}), "'Hello World'", "strip(\" \")");
     checkRep(callMethod(str("hello"), "upper"), "'HELLO'", "upper()");
@@ -292,14 +292,14 @@ int main() {
     checkRep(callMethod(str("hi"), "startswith", {str("h")}), "True",
              "\"hi\".startswith(\"h\")");
 
-    lite::Value xs = list({int_(3), int_(1)});
+    xmex::Value xs = list({int_(3), int_(1)});
     callMethod(xs, "append", {int_(2)});
     checkRep(xs, "[3, 1, 2]", "列表 append 方法就地生效");
     callMethod(xs, "sort");
     checkRep(xs, "[1, 2, 3]", "列表 sort 方法");
     checkRep(callMethod(xs, "pop"), "3", "列表 pop 方法返回末尾");
 
-    lite::Value d = dict({str("a"), int_(1), str("b"), int_(2)});
+    xmex::Value d = dict({str("a"), int_(1), str("b"), int_(2)});
     checkRep(callMethod(d, "keys"), "['a', 'b']", "keys()");
     checkRep(callMethod(d, "values"), "[1, 2]", "values()");
     checkRep(callMethod(d, "items"), "[('a', 1), ('b', 2)]", "items()");
@@ -309,17 +309,17 @@ int main() {
   // ------------------------------------------------- 算术与真值的扩展
   std::printf("\n-- 算术与真值 --\n");
   {
-    lite::Value a = str("ab");
-    lite::Value b = str("cd");
+    xmex::Value a = str("ab");
+    xmex::Value b = str("cd");
     checkRep(add(a, b), "'abcd'", "字符串 + 拼接");
 
-    lite::Value x = list({int_(1)});
-    lite::Value y = list({int_(2)});
+    xmex::Value x = list({int_(1)});
+    xmex::Value y = list({int_(2)});
     checkRep(add(x, y), "[1, 2]", "列表 + 拼接");
 
     // 曾经是 bug:字符串比的是指针,所以 "a" == "a" 为假
-    lite::Value sa1 = str("a");
-    lite::Value sa2 = str("a");
+    xmex::Value sa1 = str("a");
+    xmex::Value sa2 = str("a");
     checkRep(eq(sa1, sa2), "True", "\"a\" == \"a\"(按值比较,修掉的旧 bug)");
     checkRep(eq(list({int_(1)}), list({int_(1)})), "True", "[1] == [1]");
     checkRep(eq(list({int_(1)}), list({int_(2)})), "False", "[1] == [2]");
@@ -335,7 +335,7 @@ int main() {
                    dict({str("b"), int_(2), str("a"), int_(1)})),
              "True", "字典相等与插入序无关");
 
-    lite::Value sa = str("a"), sb = str("b");
+    xmex::Value sa = str("a"), sb = str("b");
     checkRep(lt(sa, sb), "True", "\"a\" < \"b\"");
 
     // 曾经是 bug:空容器按"非空指针即真"被判为真

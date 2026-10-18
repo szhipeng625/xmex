@@ -4,8 +4,8 @@
 //   1. 零外部依赖：仅通过 popen 调用系统自带的 curl；
 //   2. 支持 OpenAI 兼容的 chat completions API；
 //   3. 提供神经网络结构描述和修改能力（通过 JSON 中间表示）；
-//   4. 所有操作返回 lite::Value，与 PyLite 类型系统无缝对接。
-#include "pylite/runtime.h"
+//   4. 所有操作返回 xmex::Value，与 Xmex 类型系统无缝对接。
+#include "xmex/runtime.h"
 
 #include <cstdio>
 #include <cstring>
@@ -125,24 +125,24 @@ char *extractContent(const char *json) {
 //   endpoint     - API 端点，如 "https://api.openai.com/v1/chat/completions"
 //
 // 返回：模型的文本回复
-extern "C" lite::Value llm_chat(const lite::Value *prompt,
-                               const lite::Value *systemPrompt,
-                               const lite::Value *model,
-                               const lite::Value *apiKey,
-                               const lite::Value *endpoint) {
-  if (prompt->tag != lite::kStr || model->tag != lite::kStr ||
-      apiKey->tag != lite::kStr || endpoint->tag != lite::kStr) {
+extern "C" xmex::Value llm_chat(const xmex::Value *prompt,
+                               const xmex::Value *systemPrompt,
+                               const xmex::Value *model,
+                               const xmex::Value *apiKey,
+                               const xmex::Value *endpoint) {
+  if (prompt->tag != xmex::kStr || model->tag != xmex::kStr ||
+      apiKey->tag != xmex::kStr || endpoint->tag != xmex::kStr) {
     runtime_error("llm_chat() 需要字符串参数: prompt, model, api_key, endpoint");
   }
 
   const char *p = str_data(prompt);
-  const char *sp = (systemPrompt->tag == lite::kStr) ? str_data(systemPrompt) : "";
+  const char *sp = (systemPrompt->tag == xmex::kStr) ? str_data(systemPrompt) : "";
   const char *m = str_data(model);
   const char *key = str_data(apiKey);
   const char *ep = str_data(endpoint);
 
   int64_t pLen = str_size(prompt);
-  int64_t spLen = (systemPrompt->tag == lite::kStr) ? str_size(systemPrompt) : 0;
+  int64_t spLen = (systemPrompt->tag == xmex::kStr) ? str_size(systemPrompt) : 0;
   int64_t mLen = str_size(model);
   int64_t keyLen = str_size(apiKey);
   int64_t epLen = str_size(endpoint);
@@ -206,7 +206,7 @@ extern "C" lite::Value llm_chat(const lite::Value *prompt,
 
   // 检查错误响应
   if (strstr(response, "\"error\"")) {
-    lite::Value err = str_new(response, static_cast<int64_t>(strlen(response)));
+    xmex::Value err = str_new(response, static_cast<int64_t>(strlen(response)));
     free(response);
     char errBuf[1024];
     snprintf(errBuf, sizeof(errBuf), "LLM API 返回错误: %s", str_data(&err));
@@ -219,12 +219,12 @@ extern "C" lite::Value llm_chat(const lite::Value *prompt,
     // 如果解析失败，返回原始响应（截断到合理长度）
     int64_t respLen = static_cast<int64_t>(strlen(response));
     if (respLen > 2000) respLen = 2000;
-    lite::Value result = str_new(response, respLen);
+    xmex::Value result = str_new(response, respLen);
     free(response);
     return result;
   }
 
-  lite::Value result = str_new(content, static_cast<int64_t>(strlen(content)));
+  xmex::Value result = str_new(content, static_cast<int64_t>(strlen(content)));
   free(response);
   free(content);
   return result;
@@ -239,9 +239,9 @@ extern "C" lite::Value llm_chat(const lite::Value *prompt,
 //    {"type":"linear","in":256,"out":10}]
 //
 // 返回完整的网络描述 JSON 字符串。
-extern "C" lite::Value llm_create_network(const lite::Value *name,
-                                          const lite::Value *layers) {
-  if (name->tag != lite::kStr || layers->tag != lite::kStr) {
+extern "C" xmex::Value llm_create_network(const xmex::Value *name,
+                                          const xmex::Value *layers) {
+  if (name->tag != xmex::kStr || layers->tag != xmex::kStr) {
     runtime_error("llm_create_network() 需要两个字符串参数: name, layers");
   }
 
@@ -259,7 +259,7 @@ extern "C" lite::Value llm_create_network(const lite::Value *name,
     static_cast<int>(nLen), n,
     static_cast<int>(lLen), l);
 
-  lite::Value result = str_new(json, static_cast<int64_t>(strlen(json)));
+  xmex::Value result = str_new(json, static_cast<int64_t>(strlen(json)));
   free(json);
   return result;
 }
@@ -268,9 +268,9 @@ extern "C" lite::Value llm_create_network(const lite::Value *name,
 // 向已有网络描述中添加一层。
 //
 // 返回修改后的网络描述 JSON 字符串。
-extern "C" lite::Value llm_add_layer(const lite::Value *network,
-                                     const lite::Value *layer) {
-  if (network->tag != lite::kStr || layer->tag != lite::kStr) {
+extern "C" xmex::Value llm_add_layer(const xmex::Value *network,
+                                     const xmex::Value *layer) {
+  if (network->tag != xmex::kStr || layer->tag != xmex::kStr) {
     runtime_error("llm_add_layer() 需要两个字符串参数: network, layer");
   }
 
@@ -322,7 +322,7 @@ extern "C" lite::Value llm_add_layer(const lite::Value *network,
              static_cast<int>(suffixLen), end);
   }
 
-  lite::Value result = str_new(newJson, static_cast<int64_t>(strlen(newJson)));
+  xmex::Value result = str_new(newJson, static_cast<int64_t>(strlen(newJson)));
   free(newJson);
   return result;
 }
@@ -331,9 +331,9 @@ extern "C" lite::Value llm_add_layer(const lite::Value *network,
 // 从网络描述中移除指定索引的层（从 0 开始）。
 //
 // 返回修改后的网络描述 JSON 字符串。
-extern "C" lite::Value llm_remove_layer(const lite::Value *network,
-                                        const lite::Value *index) {
-  if (network->tag != lite::kStr || index->tag != lite::kInt) {
+extern "C" xmex::Value llm_remove_layer(const xmex::Value *network,
+                                        const xmex::Value *index) {
+  if (network->tag != xmex::kStr || index->tag != xmex::kInt) {
     runtime_error("llm_remove_layer() 需要 (str, int) 参数");
   }
 
@@ -347,8 +347,8 @@ extern "C" lite::Value llm_remove_layer(const lite::Value *network,
 
 // llm_network_summary(network: str) -> str
 // 生成网络结构的可读摘要。
-extern "C" lite::Value llm_network_summary(const lite::Value *network) {
-  if (network->tag != lite::kStr) {
+extern "C" xmex::Value llm_network_summary(const xmex::Value *network) {
+  if (network->tag != xmex::kStr) {
     runtime_error("llm_network_summary() 需要一个字符串参数: network");
   }
 
@@ -362,11 +362,11 @@ extern "C" lite::Value llm_network_summary(const lite::Value *network) {
   if (!summary) runtime_error("内存不足");
 
   snprintf(summary, cap,
-    "[PyLite 神经网络描述]\n%.*s\n\n"
+    "[Xmex 神经网络描述]\n%.*s\n\n"
     "提示: 使用 llm_add_layer() 添加层，使用 llm_chat() 调用推理 API。",
     static_cast<int>(netLen), net);
 
-  lite::Value result = str_new(summary, static_cast<int64_t>(strlen(summary)));
+  xmex::Value result = str_new(summary, static_cast<int64_t>(strlen(summary)));
   free(summary);
   return result;
 }
@@ -376,7 +376,7 @@ extern "C" lite::Value llm_network_summary(const lite::Value *network) {
 // ===========================================================================
 
 // llm_create_dataset(examples: str, system_prompt: str) -> str
-// 从 PyLite 列表生成 JSONL 格式的训练数据。
+// 从 Xmex 列表生成 JSONL 格式的训练数据。
 //
 // examples 是一个 JSON 数组字符串，每个元素是 {"input":"...", "output":"..."}：
 //   [{"input":"1+1=?","output":"2"},
@@ -385,16 +385,16 @@ extern "C" lite::Value llm_network_summary(const lite::Value *network) {
 // system_prompt 是可选的系统提示词（可为空字符串）。
 //
 // 返回 JSONL 格式的训练数据字符串（每行一个 JSON 对象）。
-extern "C" lite::Value llm_create_dataset(const lite::Value *examples,
-                                          const lite::Value *systemPrompt) {
-  if (examples->tag != lite::kStr) {
+extern "C" xmex::Value llm_create_dataset(const xmex::Value *examples,
+                                          const xmex::Value *systemPrompt) {
+  if (examples->tag != xmex::kStr) {
     runtime_error("llm_create_dataset() 需要字符串参数: examples (JSON 数组)");
   }
 
   const char *ex = str_data(examples);
   int64_t exLen = str_size(examples);
-  const char *sp = (systemPrompt->tag == lite::kStr) ? str_data(systemPrompt) : "";
-  int64_t spLen = (systemPrompt->tag == lite::kStr) ? str_size(systemPrompt) : 0;
+  const char *sp = (systemPrompt->tag == xmex::kStr) ? str_data(systemPrompt) : "";
+  int64_t spLen = (systemPrompt->tag == xmex::kStr) ? str_size(systemPrompt) : 0;
 
   // 简单解析 JSON 数组：按 {"input": 分割每个示例
   // 构造 JSONL 格式：每行 {"messages":[{"role":"system","content":"..."},
@@ -491,7 +491,7 @@ extern "C" lite::Value llm_create_dataset(const lite::Value *examples,
   }
 
   jsonl[pos] = '\0';
-  lite::Value result = str_new(jsonl, static_cast<int64_t>(pos));
+  xmex::Value result = str_new(jsonl, static_cast<int64_t>(pos));
   free(jsonl);
   return result;
 }
@@ -502,12 +502,12 @@ extern "C" lite::Value llm_create_dataset(const lite::Value *examples,
 // endpoint 是 files API 端点，如 "https://api.openai.com/v1/files"
 //
 // 返回文件 ID 字符串。
-extern "C" lite::Value llm_upload_file(const lite::Value *data,
-                                       const lite::Value *filename,
-                                       const lite::Value *apiKey,
-                                       const lite::Value *endpoint) {
-  if (data->tag != lite::kStr || filename->tag != lite::kStr ||
-      apiKey->tag != lite::kStr || endpoint->tag != lite::kStr) {
+extern "C" xmex::Value llm_upload_file(const xmex::Value *data,
+                                       const xmex::Value *filename,
+                                       const xmex::Value *apiKey,
+                                       const xmex::Value *endpoint) {
+  if (data->tag != xmex::kStr || filename->tag != xmex::kStr ||
+      apiKey->tag != xmex::kStr || endpoint->tag != xmex::kStr) {
     runtime_error("llm_upload_file() 需要四个字符串参数");
   }
 
@@ -523,7 +523,7 @@ extern "C" lite::Value llm_upload_file(const lite::Value *data,
 
   // 将数据写入临时文件
   char tmpPath[256];
-  snprintf(tmpPath, sizeof(tmpPath), "/tmp/pylite_upload_%.*s",
+  snprintf(tmpPath, sizeof(tmpPath), "/tmp/xmex_upload_%.*s",
            static_cast<int>(fnLen), fn);
 
   FILE *fp = fopen(tmpPath, "w");
@@ -574,12 +574,12 @@ extern "C" lite::Value llm_upload_file(const lite::Value *data,
 
   if (!fileId) {
     // 返回原始响应作为错误信息
-    lite::Value result = str_new(response, static_cast<int64_t>(strlen(response)));
+    xmex::Value result = str_new(response, static_cast<int64_t>(strlen(response)));
     free(response);
     return result;
   }
 
-  lite::Value result = str_new(fileId, static_cast<int64_t>(strlen(fileId)));
+  xmex::Value result = str_new(fileId, static_cast<int64_t>(strlen(fileId)));
   free(response);
   free(fileId);
   return result;
@@ -592,25 +592,25 @@ extern "C" lite::Value llm_upload_file(const lite::Value *data,
 // endpoint 是 fine-tunes API 端点，如 "https://api.openai.com/v1/fine_tuning/jobs"
 //
 // 返回微调任务 ID 字符串。
-extern "C" lite::Value llm_create_finetune(const lite::Value *fileId,
-                                           const lite::Value *model,
-                                           const lite::Value *suffix,
-                                           const lite::Value *apiKey,
-                                           const lite::Value *endpoint) {
-  if (fileId->tag != lite::kStr || model->tag != lite::kStr ||
-      apiKey->tag != lite::kStr || endpoint->tag != lite::kStr) {
+extern "C" xmex::Value llm_create_finetune(const xmex::Value *fileId,
+                                           const xmex::Value *model,
+                                           const xmex::Value *suffix,
+                                           const xmex::Value *apiKey,
+                                           const xmex::Value *endpoint) {
+  if (fileId->tag != xmex::kStr || model->tag != xmex::kStr ||
+      apiKey->tag != xmex::kStr || endpoint->tag != xmex::kStr) {
     runtime_error("llm_create_finetune() 需要字符串参数: file_id, model, api_key, endpoint");
   }
 
   const char *fid = str_data(fileId);
   const char *m = str_data(model);
-  const char *suf = (suffix->tag == lite::kStr) ? str_data(suffix) : "pylite-model";
+  const char *suf = (suffix->tag == xmex::kStr) ? str_data(suffix) : "xmex-model";
   const char *key = str_data(apiKey);
   const char *ep = str_data(endpoint);
 
   int64_t fidLen = str_size(fileId);
   int64_t mLen = str_size(model);
-  int64_t sufLen = (suffix->tag == lite::kStr) ? str_size(suffix) : 11;
+  int64_t sufLen = (suffix->tag == xmex::kStr) ? str_size(suffix) : 11;
   int64_t keyLen = str_size(apiKey);
   int64_t epLen = str_size(endpoint);
 
@@ -670,12 +670,12 @@ extern "C" lite::Value llm_create_finetune(const lite::Value *fileId,
   }
 
   if (!jobId) {
-    lite::Value result = str_new(response, static_cast<int64_t>(strlen(response)));
+    xmex::Value result = str_new(response, static_cast<int64_t>(strlen(response)));
     free(response);
     return result;
   }
 
-  lite::Value result = str_new(jobId, static_cast<int64_t>(strlen(jobId)));
+  xmex::Value result = str_new(jobId, static_cast<int64_t>(strlen(jobId)));
   free(response);
   free(jobId);
   return result;
@@ -686,10 +686,10 @@ extern "C" lite::Value llm_create_finetune(const lite::Value *fileId,
 //
 // endpoint 格式: "https://api.openai.com/v1/fine_tuning/jobs/{job_id}"
 // 如果 endpoint 不含 {job_id}，会自动拼接。
-extern "C" lite::Value llm_finetune_status(const lite::Value *jobId,
-                                           const lite::Value *apiKey,
-                                           const lite::Value *endpoint) {
-  if (jobId->tag != lite::kStr || apiKey->tag != lite::kStr || endpoint->tag != lite::kStr) {
+extern "C" xmex::Value llm_finetune_status(const xmex::Value *jobId,
+                                           const xmex::Value *apiKey,
+                                           const xmex::Value *endpoint) {
+  if (jobId->tag != xmex::kStr || apiKey->tag != xmex::kStr || endpoint->tag != xmex::kStr) {
     runtime_error("llm_finetune_status() 需要三个字符串参数");
   }
 
@@ -730,16 +730,16 @@ extern "C" lite::Value llm_finetune_status(const lite::Value *jobId,
     runtime_error("微调状态查询失败: 无响应");
   }
 
-  lite::Value result = str_new(response, static_cast<int64_t>(strlen(response)));
+  xmex::Value result = str_new(response, static_cast<int64_t>(strlen(response)));
   free(response);
   return result;
 }
 
 // llm_list_finetunes(api_key: str, endpoint: str) -> str
 // 列出所有微调任务。
-extern "C" lite::Value llm_list_finetunes(const lite::Value *apiKey,
-                                          const lite::Value *endpoint) {
-  if (apiKey->tag != lite::kStr || endpoint->tag != lite::kStr) {
+extern "C" xmex::Value llm_list_finetunes(const xmex::Value *apiKey,
+                                          const xmex::Value *endpoint) {
+  if (apiKey->tag != xmex::kStr || endpoint->tag != xmex::kStr) {
     runtime_error("llm_list_finetunes() 需要两个字符串参数");
   }
 
@@ -766,7 +766,7 @@ extern "C" lite::Value llm_list_finetunes(const lite::Value *apiKey,
     runtime_error("微调列表查询失败: 无响应");
   }
 
-  lite::Value result = str_new(response, static_cast<int64_t>(strlen(response)));
+  xmex::Value result = str_new(response, static_cast<int64_t>(strlen(response)));
   free(response);
   return result;
 }

@@ -1,6 +1,6 @@
 // 线程 / 进程创建与资源管理。
 //
-// 与项目其它运行时模块一致:对外是 extern "C" 函数,参数按 lite::Value 指针约定
+// 与项目其它运行时模块一致:对外是 extern "C" 函数,参数按 xmex::Value 指针约定
 // 交换,出错走 runtime_error(打印后退出)。
 //
 // 设计要点:
@@ -11,7 +11,7 @@
 //      避免句柄长期堆积。
 //   3. 所有跨线程共享的结构都由一把互斥锁保护;持锁期间不做阻塞等待,
 //      否则 join 会把别的线程挡在外面。
-#include "pylite/runtime.h"
+#include "xmex/runtime.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -115,7 +115,7 @@ extern "C" int64_t thread_register_task(const char *name, void *fn, void *arg) {
 }
 
 // 按名字启动一个线程,返回线程号;找不到任务名则报错。
-extern "C" lite::Value thread_start(const char *taskName) {
+extern "C" xmex::Value thread_start(const char *taskName) {
   using Fn = void (*)(void *);
   if (taskName == nullptr) runtime_error("线程任务名不能为空");
   Fn fn = nullptr;
@@ -207,8 +207,8 @@ extern "C" int64_t thread_count() {
 // 进程
 // ---------------------------------------------------------------------------
 // 同步执行一条 shell 命令,返回其标准输出(与 docker.cpp 的捕获方式一致)。
-extern "C" lite::Value process_run(const lite::Value *cmd) {
-  if (cmd == nullptr || cmd->tag != lite::kStr) runtime_error("process_run 需要命令字符串");
+extern "C" xmex::Value process_run(const xmex::Value *cmd) {
+  if (cmd == nullptr || cmd->tag != xmex::kStr) runtime_error("process_run 需要命令字符串");
   const char *c = str_data(cmd);
 #ifdef _WIN32
   FILE *fp = _popen(c, "r");
@@ -229,8 +229,8 @@ extern "C" lite::Value process_run(const lite::Value *cmd) {
 }
 
 // 后台启动一条命令,返回进程号;进程号登记进句柄表以便查询与回收。
-extern "C" int64_t process_spawn(const lite::Value *cmd) {
-  if (cmd == nullptr || cmd->tag != lite::kStr) runtime_error("process_spawn 需要命令字符串");
+extern "C" int64_t process_spawn(const xmex::Value *cmd) {
+  if (cmd == nullptr || cmd->tag != xmex::kStr) runtime_error("process_spawn 需要命令字符串");
   const char *c = str_data(cmd);
   int64_t id = 0;
 #ifdef _WIN32
@@ -316,7 +316,7 @@ extern "C" int64_t process_kill(int64_t id) {
 // 资源管理
 // ---------------------------------------------------------------------------
 // 资源快照:存活线程数、运行中线程数、登记进程数。
-extern "C" lite::Value resource_stats() {
+extern "C" xmex::Value resource_stats() {
   lockAcq();
   int64_t total = 0, running = 0;
   for (auto &t : threads()) { ++total; if (t.running) ++running; }
@@ -349,7 +349,7 @@ extern "C" int64_t resource_reap() {
 // ---------------------------------------------------------------------------
 // 互斥锁与条件变量
 // ---------------------------------------------------------------------------
-// 对外用 lite::Value 交换(与内置模块调用约定一致):句柄是一个整数,实际对象
+// 对外用 xmex::Value 交换(与内置模块调用约定一致):句柄是一个整数,实际对象
 // 登记在带锁的表里,靠句柄访问 —— 语言层因此不需要认识原生指针。
 //
 // ⚠️ 取到原生指针后**先释放表锁再操作**。条件变量的等待会阻塞,若握着表锁
@@ -376,7 +376,7 @@ CondType *condOf(int64_t id) {
 }  // namespace
 
 // 创建一个互斥锁,返回其句柄。
-extern "C" lite::Value sync_mutex_new() {
+extern "C" xmex::Value sync_mutex_new() {
 #ifdef _WIN32
   auto *m = new MutexType();
   InitializeCriticalSection(m);
@@ -392,8 +392,8 @@ extern "C" lite::Value sync_mutex_new() {
 }
 
 // 加锁(阻塞直到拿到)。
-extern "C" lite::Value sync_mutex_lock(const lite::Value *h) {
-  if (h == nullptr || h->tag != lite::kInt) runtime_error("互斥锁需要一个句柄");
+extern "C" xmex::Value sync_mutex_lock(const xmex::Value *h) {
+  if (h == nullptr || h->tag != xmex::kInt) runtime_error("互斥锁需要一个句柄");
   const int64_t id = h->as.i;
   lockAcq();
   MutexType *m = mutexOf(id);
@@ -408,8 +408,8 @@ extern "C" lite::Value sync_mutex_lock(const lite::Value *h) {
 }
 
 // 解锁。
-extern "C" lite::Value sync_mutex_unlock(const lite::Value *h) {
-  if (h == nullptr || h->tag != lite::kInt) runtime_error("互斥锁需要一个句柄");
+extern "C" xmex::Value sync_mutex_unlock(const xmex::Value *h) {
+  if (h == nullptr || h->tag != xmex::kInt) runtime_error("互斥锁需要一个句柄");
   const int64_t id = h->as.i;
   lockAcq();
   MutexType *m = mutexOf(id);
@@ -424,8 +424,8 @@ extern "C" lite::Value sync_mutex_unlock(const lite::Value *h) {
 }
 
 // 销毁互斥锁。槽位置空,重复销毁是安全的空操作。
-extern "C" lite::Value sync_mutex_free(const lite::Value *h) {
-  if (h == nullptr || h->tag != lite::kInt) runtime_error("互斥锁需要一个句柄");
+extern "C" xmex::Value sync_mutex_free(const xmex::Value *h) {
+  if (h == nullptr || h->tag != xmex::kInt) runtime_error("互斥锁需要一个句柄");
   const int64_t id = h->as.i;
   lockAcq();
   MutexType *m = nullptr;
@@ -446,7 +446,7 @@ extern "C" lite::Value sync_mutex_free(const lite::Value *h) {
 }
 
 // 创建一个条件变量,返回其句柄。
-extern "C" lite::Value sync_cond_new() {
+extern "C" xmex::Value sync_cond_new() {
 #ifdef _WIN32
   auto *c = new CondType();
   InitializeConditionVariable(c);
@@ -463,9 +463,9 @@ extern "C" lite::Value sync_cond_new() {
 
 // 等待通知:等待期间原子地放开传入的锁,被唤醒后重新拿回它。
 // 这正是"检查条件"与"等待"之间不丢唤醒的关键。
-extern "C" lite::Value sync_cond_wait(const lite::Value *ch, const lite::Value *mh) {
-  if (ch == nullptr || ch->tag != lite::kInt) runtime_error("条件变量需要一个句柄");
-  if (mh == nullptr || mh->tag != lite::kInt) runtime_error("等待需要一把互斥锁");
+extern "C" xmex::Value sync_cond_wait(const xmex::Value *ch, const xmex::Value *mh) {
+  if (ch == nullptr || ch->tag != xmex::kInt) runtime_error("条件变量需要一个句柄");
+  if (mh == nullptr || mh->tag != xmex::kInt) runtime_error("等待需要一把互斥锁");
   const int64_t cid = ch->as.i;
   const int64_t mid = mh->as.i;
   lockAcq();
@@ -483,8 +483,8 @@ extern "C" lite::Value sync_cond_wait(const lite::Value *ch, const lite::Value *
 }
 
 // 唤醒一个等待者。
-extern "C" lite::Value sync_cond_signal(const lite::Value *ch) {
-  if (ch == nullptr || ch->tag != lite::kInt) runtime_error("条件变量需要一个句柄");
+extern "C" xmex::Value sync_cond_signal(const xmex::Value *ch) {
+  if (ch == nullptr || ch->tag != xmex::kInt) runtime_error("条件变量需要一个句柄");
   const int64_t cid = ch->as.i;
   lockAcq();
   CondType *c = condOf(cid);
@@ -499,8 +499,8 @@ extern "C" lite::Value sync_cond_signal(const lite::Value *ch) {
 }
 
 // 唤醒全部等待者。
-extern "C" lite::Value sync_cond_broadcast(const lite::Value *ch) {
-  if (ch == nullptr || ch->tag != lite::kInt) runtime_error("条件变量需要一个句柄");
+extern "C" xmex::Value sync_cond_broadcast(const xmex::Value *ch) {
+  if (ch == nullptr || ch->tag != xmex::kInt) runtime_error("条件变量需要一个句柄");
   const int64_t cid = ch->as.i;
   lockAcq();
   CondType *c = condOf(cid);
@@ -515,8 +515,8 @@ extern "C" lite::Value sync_cond_broadcast(const lite::Value *ch) {
 }
 
 // 销毁条件变量。
-extern "C" lite::Value sync_cond_free(const lite::Value *ch) {
-  if (ch == nullptr || ch->tag != lite::kInt) runtime_error("条件变量需要一个句柄");
+extern "C" xmex::Value sync_cond_free(const xmex::Value *ch) {
+  if (ch == nullptr || ch->tag != xmex::kInt) runtime_error("条件变量需要一个句柄");
   const int64_t cid = ch->as.i;
   lockAcq();
   CondType *c = nullptr;
@@ -537,7 +537,7 @@ extern "C" lite::Value sync_cond_free(const lite::Value *ch) {
 }
 
 // 同步原语的数量快照(供排查与测试使用)。
-extern "C" lite::Value sync_stats() {
+extern "C" xmex::Value sync_stats() {
   lockAcq();
   const int64_t mcount = static_cast<int64_t>(mutexTable().size());
   const int64_t ccount = static_cast<int64_t>(condTable().size());
@@ -556,13 +556,13 @@ extern "C" void sleep_ms(int64_t ms) {
   std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 }
 
-extern "C" lite::Value time_ms() {
+extern "C" xmex::Value time_ms() {
   auto now = std::chrono::system_clock::now().time_since_epoch();
   int64_t ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
   return int_(ms);
 }
 
-extern "C" lite::Value time_s() {
+extern "C" xmex::Value time_s() {
   auto now = std::chrono::system_clock::now().time_since_epoch();
   int64_t s = std::chrono::duration_cast<std::chrono::seconds>(now).count();
   return int_(s);

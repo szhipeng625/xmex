@@ -1,5 +1,5 @@
 #include "sysmon.h"
-#include "../include/pylite/runtime.h"
+#include "../include/xmex/runtime.h"
 #include <cstring>
 #include <sstream>
 
@@ -10,7 +10,7 @@ extern "C" {
 // ============================================================================
 
 // 返回 CPU 统计信息的 JSON 字符串
-lite::Value sysmon_cpu_stats() {
+xmex::Value sysmon_cpu_stats() {
     auto stats = read_cpu_stats();
     std::ostringstream json;
     json << "{";
@@ -45,7 +45,7 @@ int64_t sysmon_process_cpu_ms(int64_t pid) {
 // ============================================================================
 
 // 返回系统内存信息的 JSON 字符串
-lite::Value sysmon_mem_info() {
+xmex::Value sysmon_mem_info() {
     auto info = read_mem_info();
     std::ostringstream json;
     json << "{";
@@ -69,7 +69,7 @@ int64_t sysmon_process_mem_kb(int64_t pid) {
 }
 
 // 获取指定进程的详细内存信息 JSON
-lite::Value sysmon_process_mem_info(int64_t pid) {
+xmex::Value sysmon_process_mem_info(int64_t pid) {
     auto info = read_process_mem(static_cast<pid_t>(pid));
     std::ostringstream json;
     json << "{";
@@ -88,7 +88,7 @@ lite::Value sysmon_process_mem_info(int64_t pid) {
 // ============================================================================
 
 // 获取所有进程 PID 列表（JSON 数组）
-lite::Value sysmon_list_processes() {
+xmex::Value sysmon_list_processes() {
     auto pids = list_processes();
     std::ostringstream json;
     json << "[";
@@ -102,7 +102,7 @@ lite::Value sysmon_list_processes() {
 }
 
 // 获取指定进程的详细信息 JSON
-lite::Value sysmon_process_info(int64_t pid) {
+xmex::Value sysmon_process_info(int64_t pid) {
     auto info = read_process_info(static_cast<pid_t>(pid));
     std::ostringstream json;
     json << "{";
@@ -124,7 +124,7 @@ lite::Value sysmon_process_info(int64_t pid) {
 }
 
 // 获取进程树的总资源用量 JSON
-lite::Value sysmon_tree_usage(int64_t root_pid) {
+xmex::Value sysmon_tree_usage(int64_t root_pid) {
     auto usage = read_tree_usage(static_cast<pid_t>(root_pid));
     std::ostringstream json;
     json << "{";
@@ -141,7 +141,7 @@ lite::Value sysmon_tree_usage(int64_t root_pid) {
 // ============================================================================
 
 // 返回网络接口统计 JSON
-lite::Value sysmon_net_stats() {
+xmex::Value sysmon_net_stats() {
     auto devs = read_net_stats();
     std::ostringstream json;
     json << "[";
@@ -165,7 +165,7 @@ lite::Value sysmon_net_stats() {
 // ============================================================================
 
 // 返回文件系统配额 JSON
-lite::Value sysmon_fs_quota(const char *path, int64_t pathLen) {
+xmex::Value sysmon_fs_quota(const char *path, int64_t pathLen) {
     std::string p(path, pathLen);
     auto quota = read_fs_quota(p);
     std::ostringstream json;
@@ -199,7 +199,7 @@ int64_t sysmon_dir_file_count(const char *path, int64_t pathLen) {
 // ============================================================================
 
 // 返回系统信息 JSON
-lite::Value sysmon_sys_info() {
+xmex::Value sysmon_sys_info() {
     auto info = read_sys_info();
     std::ostringstream json;
     json << "{";
@@ -215,7 +215,7 @@ lite::Value sysmon_sys_info() {
 }
 
 // 返回系统负载
-lite::Value sysmon_load_avg() {
+xmex::Value sysmon_load_avg() {
     std::ostringstream json;
     json << "{";
     json << "\"load_1min\":" << read_load_avg_1min() << ",";

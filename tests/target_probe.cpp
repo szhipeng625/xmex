@@ -1,6 +1,6 @@
 // 诊断工具:确认 LLVM 目标注册表的状态。
 //
-// 起因是 pylitec 报 "no targets are registered" —— 目标初始化那一组调用
+// 起因是 xmexc 报 "no targets are registered" —— 目标初始化那一组调用
 // 明明链接通过、也确实执行了,注册表却是空的。这个探针把注册表的真实内容
 // 打出来,避免继续靠猜。
 #include "llvm/MC/TargetRegistry.h"

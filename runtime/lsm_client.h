@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-namespace pylite_lsm {
+namespace xmex_lsm {
 
 // 极简 Redis(RESP) 客户端:支持 SET/GET/DEL/KEYS,同步阻塞,超时短
 // 用法: LsmClient c("43.157.39.171", 6380); c.set("k","v"); auto v = c.get("k");
@@ -28,4 +28,4 @@ private:
     bool cmd(const std::vector<std::string>& parts, std::string& reply);
 };
 
-}  // namespace pylite_lsm
+}  // namespace xmex_lsm

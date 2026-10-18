@@ -4,7 +4,7 @@
 set -u
 
 ROOT=/root/autodl-tmp/llvm-project/llvm
-OUT=/tmp/pylite-e2e
+OUT=/tmp/xmex-e2e
 mkdir -p "$OUT"
 
 pass=0
@@ -16,7 +16,7 @@ for pys in "$ROOT"/tests/e2e/*.pys; do
   drv="$OUT/${name}_main.cpp"
   exe="$OUT/$name.exe"
 
-  if ! "$ROOT/build/bin/pylitec" "$pys" -o "$obj" > "$OUT/$name.log" 2>&1; then
+  if ! "$ROOT/build/bin/xmexc" "$pys" -o "$obj" > "$OUT/$name.log" 2>&1; then
     echo "=== $name: 编译失败 ==="
     cat "$OUT/$name.log"
     fail=$((fail + 1))
@@ -24,11 +24,11 @@ for pys in "$ROOT"/tests/e2e/*.pys; do
   fi
 
   # 每个用例配一个最小的 C++ 驱动,只调用编译产物
-  printf 'extern "C" void pylite_%s_main();\nint main(){ pylite_%s_main(); return 0; }\n' \
+  printf 'extern "C" void xmex_%s_main();\nint main(){ xmex_%s_main(); return 0; }\n' \
     "$name" "$name" > "$drv"
 
   if ! clang++-22 -std=c++20 "$drv" "$obj" -o "$exe" \
-        -L"$ROOT/build/bin" -lpylite_runtime -Wl,-rpath,"$ROOT/build/bin" 2> "$OUT/$name.link.log"; then
+        -L"$ROOT/build/bin" -lxmex_runtime -Wl,-rpath,"$ROOT/build/bin" 2> "$OUT/$name.link.log"; then
     echo "=== $name: 链接失败 ==="
     cat "$OUT/$name.link.log"
     fail=$((fail + 1))

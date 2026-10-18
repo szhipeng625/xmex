@@ -12,7 +12,7 @@
 //   - 零外部依赖：不引入 PyTorch/Transformers，纯 C++ 实现
 //   - 内存高效：权重保持 4-bit 量化，推理时按需反量化
 //   - GPU 加速：关键算子通过 CUDA 内核执行
-#include "pylite/runtime.h"
+#include "xmex/runtime.h"
 
 #include <cstdio>
 #include <cstring>
@@ -117,9 +117,9 @@ static struct {
 // 加载 safetensors 模型权重和配置。
 //
 // 返回模型信息摘要。
-extern "C" lite::Value inference_load_model(const lite::Value *modelPath,
-                                            const lite::Value *configPath) {
-  if (modelPath->tag != lite::kStr || configPath->tag != lite::kStr) {
+extern "C" xmex::Value inference_load_model(const xmex::Value *modelPath,
+                                            const xmex::Value *configPath) {
+  if (modelPath->tag != xmex::kStr || configPath->tag != xmex::kStr) {
     runtime_error("inference_load_model() 需要两个字符串参数");
   }
 
@@ -253,19 +253,19 @@ extern "C" lite::Value inference_load_model(const lite::Value *modelPath,
 //   5. 反分词输出文本
 //
 // 当前版本返回性能估算和架构说明。
-extern "C" lite::Value inference_generate(const lite::Value *prompt,
-                                          const lite::Value *maxTokens,
-                                          const lite::Value *temperature,
-                                          const lite::Value *topP,
-                                          const lite::Value *topK) {
+extern "C" xmex::Value inference_generate(const xmex::Value *prompt,
+                                          const xmex::Value *maxTokens,
+                                          const xmex::Value *temperature,
+                                          const xmex::Value *topP,
+                                          const xmex::Value *topK) {
   if (!g_infer.loaded) {
     runtime_error("模型未加载，请先调用 inference_load_model()");
   }
 
-  int64_t maxTok = (maxTokens->tag == lite::kInt) ? as_int(*maxTokens) : 256;
-  double temp = (temperature->tag == lite::kFloat) ? as_float(*temperature) : 0.7;
-  double tp = (topP->tag == lite::kFloat) ? as_float(*topP) : 0.9;
-  int64_t tk = (topK->tag == lite::kInt) ? as_int(*topK) : 50;
+  int64_t maxTok = (maxTokens->tag == xmex::kInt) ? as_int(*maxTokens) : 256;
+  double temp = (temperature->tag == xmex::kFloat) ? as_float(*temperature) : 0.7;
+  double tp = (topP->tag == xmex::kFloat) ? as_float(*topP) : 0.9;
+  int64_t tk = (topK->tag == xmex::kInt) ? as_int(*topK) : 50;
 
   // 计算推理性能估算
   double flopsPerLayer = 2.0 * (
@@ -315,7 +315,7 @@ extern "C" lite::Value inference_generate(const lite::Value *prompt,
 
 // inference_kv_cache_stats() -> str
 // 返回 KV Cache 使用统计。
-extern "C" lite::Value inference_kv_cache_stats() {
+extern "C" xmex::Value inference_kv_cache_stats() {
   if (!g_infer.loaded) {
     runtime_error("模型未加载");
   }
@@ -356,9 +356,9 @@ extern "C" lite::Value inference_kv_cache_stats() {
 //   1. 分块计算 Softmax（online softmax）
 //   2. 避免将完整的 Attention 矩阵写回 HBM
 //   3. 在 SRAM 中完成 QK^T + Softmax + PV 的全流程
-extern "C" lite::Value inference_flash_attention_kernel() {
+extern "C" xmex::Value inference_flash_attention_kernel() {
   const char *kernel = R"(
-// FlashAttention 融合内核 for PyLite
+// FlashAttention 融合内核 for Xmex
 // 在共享内存中完成 QK^T + Softmax + PV，避免中间矩阵写回全局内存
 //
 // 参考: Dao et al., "FlashAttention: Fast and Memory-Efficient Exact Attention"
@@ -479,7 +479,7 @@ extern "C" __global__ void flash_attention_fwd(
 
 // inference_multi_gpu_info() -> str
 // 查询多 GPU 信息和张量并行配置建议。
-extern "C" lite::Value inference_multi_gpu_info() {
+extern "C" xmex::Value inference_multi_gpu_info() {
   // 通过 nvidia-smi 查询 GPU 数量
   FILE *fp = popen("nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>&1", "r");
   if (!fp) {
@@ -531,7 +531,7 @@ extern "C" lite::Value inference_multi_gpu_info() {
 
 // inference_profile() -> str
 // 返回推理性能分解（延迟拆分为各组件）。
-extern "C" lite::Value inference_profile() {
+extern "C" xmex::Value inference_profile() {
   if (!g_infer.loaded) {
     runtime_error("模型未加载");
   }

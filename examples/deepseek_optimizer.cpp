@@ -1,16 +1,16 @@
 // DeepSeek-R1-14B-AWQ 模型加速与结构修改
 //
-// 基于 PyLite C++ API，针对 Qwen2 架构实现：
+// 基于 Xmex C++ API，针对 Qwen2 架构实现：
 //   1. 模型结构分析与可视化
 //   2. 融合 CUDA 内核生成（QKV 投影、SwiGLU FFN、RMS Norm）
 //   3. 网络结构修改（层数、隐藏维度、注意力头数等）
 //   4. 性能对比分析
 //
 // 编译方式：
-//   g++ -std=c++17 -I../include -L../build/bin -lpylite_runtime \
+//   g++ -std=c++17 -I../include -L../build/bin -lxmex_runtime \
 //       -Wl,-rpath,../build/bin -o deepseek_opt deepseek_optimizer.cpp
 
-#include "pylite/api.h"
+#include "xmex/api.h"
 
 #include <iostream>
 #include <iomanip>
@@ -132,22 +132,22 @@ void generateFusedKernels(const Qwen2Config &cfg) {
   std::cout << "  V: [" << cfg.hiddenSize << " x " << kvDim << "]\n";
 
   // 构建 QKV 融合计算图
-  std::string graph = pylite::fusion::create_graph("qwen2_qkv_projection");
-  graph = pylite::fusion::add_op(graph, "matmul", "q_proj",
+  std::string graph = xmex::fusion::create_graph("qwen2_qkv_projection");
+  graph = xmex::fusion::add_op(graph, "matmul", "q_proj",
     "{\"in_features\":" + std::to_string(cfg.hiddenSize) +
     ",\"out_features\":" + std::to_string(cfg.hiddenSize) + "}");
-  graph = pylite::fusion::add_op(graph, "matmul", "k_proj",
+  graph = xmex::fusion::add_op(graph, "matmul", "k_proj",
     "{\"in_features\":" + std::to_string(cfg.hiddenSize) +
     ",\"out_features\":" + std::to_string(kvDim) + "}");
-  graph = pylite::fusion::add_op(graph, "matmul", "v_proj",
+  graph = xmex::fusion::add_op(graph, "matmul", "v_proj",
     "{\"in_features\":" + std::to_string(cfg.hiddenSize) +
     ",\"out_features\":" + std::to_string(kvDim) + "}");
 
-  std::string qkvResult = pylite::fusion::apply_rules(graph);
+  std::string qkvResult = xmex::fusion::apply_rules(graph);
   std::cout << "  融合规则匹配: QKV 投影合并 → qkv_projection\n";
 
   // 自动调优 QKV 融合
-  std::string qkvConfig = pylite::fusion::autotune(
+  std::string qkvConfig = xmex::fusion::autotune(
       "qkv_fusion", 1, cfg.hiddenSize + 2 * kvDim, cfg.hiddenSize);
   std::cout << "  自动调优配置: " << qkvConfig << "\n\n";
 
@@ -161,22 +161,22 @@ void generateFusedKernels(const Qwen2Config &cfg) {
   std::cout << "  down: [" << cfg.intermediateSize << " x " << cfg.hiddenSize << "]\n";
 
   // 构建 SwiGLU FFN 计算图
-  std::string ffnGraph = pylite::fusion::create_graph("qwen2_swiglu_ffn");
-  ffnGraph = pylite::fusion::add_op(ffnGraph, "matmul", "gate_proj",
+  std::string ffnGraph = xmex::fusion::create_graph("qwen2_swiglu_ffn");
+  ffnGraph = xmex::fusion::add_op(ffnGraph, "matmul", "gate_proj",
     "{\"in_features\":" + std::to_string(cfg.hiddenSize) +
     ",\"out_features\":" + std::to_string(cfg.intermediateSize) + "}");
-  ffnGraph = pylite::fusion::add_op(ffnGraph, "matmul", "up_proj",
+  ffnGraph = xmex::fusion::add_op(ffnGraph, "matmul", "up_proj",
     "{\"in_features\":" + std::to_string(cfg.hiddenSize) +
     ",\"out_features\":" + std::to_string(cfg.intermediateSize) + "}");
-  ffnGraph = pylite::fusion::add_op(ffnGraph, "matmul", "down_proj",
+  ffnGraph = xmex::fusion::add_op(ffnGraph, "matmul", "down_proj",
     "{\"in_features\":" + std::to_string(cfg.intermediateSize) +
     ",\"out_features\":" + std::to_string(cfg.hiddenSize) + "}");
 
-  std::string ffnResult = pylite::fusion::apply_rules(ffnGraph);
+  std::string ffnResult = xmex::fusion::apply_rules(ffnGraph);
   std::cout << "  融合规则匹配: gate+up 合并 → 双矩阵乘法融合\n";
 
   // 自动调优 FFN 融合
-  std::string ffnConfig = pylite::fusion::autotune(
+  std::string ffnConfig = xmex::fusion::autotune(
       "linear_gelu", 1, cfg.intermediateSize, cfg.hiddenSize);
   std::cout << "  自动调优配置: " << ffnConfig << "\n\n";
 
@@ -186,11 +186,11 @@ void generateFusedKernels(const Qwen2Config &cfg) {
   std::cout << "--- 3. 生成融合 CUDA 内核 ---\n";
 
   // QKV 融合内核
-  std::string qkvKernel = pylite::fusion::generate_kernel("qkv_fusion", qkvConfig);
+  std::string qkvKernel = xmex::fusion::generate_kernel("qkv_fusion", qkvConfig);
   std::cout << "QKV 融合内核已生成 (" << qkvKernel.size() << " 字节)\n";
 
   // SwiGLU FFN 融合内核
-  std::string ffnKernel = pylite::fusion::generate_kernel("linear_gelu", ffnConfig);
+  std::string ffnKernel = xmex::fusion::generate_kernel("linear_gelu", ffnConfig);
   std::cout << "SwiGLU FFN 融合内核已生成 (" << ffnKernel.size() << " 字节)\n\n";
 
   // =========================================================================

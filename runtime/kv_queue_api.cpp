@@ -2,12 +2,12 @@
 // 设计:以共享 LSM 存储为介质,用 LPUSH/RPOP 实现 FIFO 任务队列,
 //       用 INCR/DECR 计数器实现每个节点的在评配额管理。
 // 键结构:
-//   pylite:mq:{queue}        列表,任务负载(FIFO:LPUSH 入 / RPOP 出)
-//   pylite:quota:{node}      字符串,节点配额上限(可同时领取的任务数)
-//   pylite:inflight:{node}   计数器,节点当前在评任务数
+//   xmex:mq:{queue}        列表,任务负载(FIFO:LPUSH 入 / RPOP 出)
+//   xmex:quota:{node}      字符串,节点配额上限(可同时领取的任务数)
+//   xmex:inflight:{node}   计数器,节点当前在评任务数
 #include "kv_admin.h"
 #include "lsm_client.h"
-#include "../include/pylite/runtime.h"
+#include "../include/xmex/runtime.h"
 #include <sstream>
 #include <cstring>
 #include <cstdlib>
@@ -43,7 +43,7 @@ std::string unesc_val(const std::string& in) {
 }
 
 // 从 KvAdmin 持久化地址构造 LSM 客户端;未配置返回失效客户端
-pylite_lsm::LsmClient make_client() {
+xmex_lsm::LsmClient make_client() {
     std::string addr = KvAdmin::instance().persistence_addr();
     std::string host = addr;
     int port = 6380;
@@ -52,10 +52,10 @@ pylite_lsm::LsmClient make_client() {
         host = addr.substr(0, c);
         port = std::atoi(addr.substr(c + 1).c_str());
     }
-    return pylite_lsm::LsmClient(host, port, 3000);
+    return xmex_lsm::LsmClient(host, port, 3000);
 }
 
-lite::Value json_result(bool ok, const std::string& extra) {
+xmex::Value json_result(bool ok, const std::string& extra) {
     std::ostringstream j;
     j << "{\"success\":" << (ok ? "true" : "false");
     if (!extra.empty()) j << "," << extra;
@@ -68,11 +68,11 @@ lite::Value json_result(bool ok, const std::string& extra) {
 extern "C" {
 
 // kv.enqueue(queue, payload) → 任务入队,返回 {"success":true,"qlen":N}
-lite::Value kv_enqueue(const char* queue, int64_t qLen,
+xmex::Value kv_enqueue(const char* queue, int64_t qLen,
                       const char* payload, int64_t pLen) {
     auto cli = make_client();
     if (!cli.ok()) return json_result(false, "\"error\":\"lsm unavailable\"");
-    std::string key = "pylite:mq:" + std::string(queue, qLen);
+    std::string key = "xmex:mq:" + std::string(queue, qLen);
     long long n = cli.lpush(key, esc_val(std::string(payload, pLen)));
     if (n < 0) return json_result(false, "\"error\":\"lpush failed\"");
     std::ostringstream ex;
@@ -88,16 +88,16 @@ lite::Value kv_enqueue(const char* queue, int64_t qLen,
 //   配额已满 → "FULL"
 //   存储不可用 → "ERROR"
 // 配额未设置时默认上限 1(与现有消费者 prefetch=1 行为一致)。
-lite::Value kv_dequeue(const char* node_id, int64_t nLen,
+xmex::Value kv_dequeue(const char* node_id, int64_t nLen,
                       const char* queue, int64_t qLen) {
     auto cli = make_client();
     if (!cli.ok()) return str_new("ERROR", 5);
     std::string node(node_id, nLen);
-    std::string inflight_key = "pylite:inflight:" + node;
+    std::string inflight_key = "xmex:inflight:" + node;
     // 读取配额上限(默认 1)
     long long quota = 1;
     std::string qs;
-    if (cli.get("pylite:quota:" + node, qs) && !qs.empty()) {
+    if (cli.get("xmex:quota:" + node, qs) && !qs.empty()) {
         quota = std::atoll(qs.c_str());
         if (quota <= 0) quota = 1;
     }
@@ -110,7 +110,7 @@ lite::Value kv_dequeue(const char* node_id, int64_t nLen,
     }
     // 领取任务
     std::string task;
-    std::string key = "pylite:mq:" + std::string(queue, qLen);
+    std::string key = "xmex:mq:" + std::string(queue, qLen);
     if (!cli.rpop(key, task)) {
         cli.decr(inflight_key);  // 队列空,归还配额
         return str_new("EMPTY", 5);
@@ -120,10 +120,10 @@ lite::Value kv_dequeue(const char* node_id, int64_t nLen,
 }
 
 // kv.done(node_id) → 节点完成一个任务,在评数 -1
-lite::Value kv_done(const char* node_id, int64_t nLen) {
+xmex::Value kv_done(const char* node_id, int64_t nLen) {
     auto cli = make_client();
     if (!cli.ok()) return json_result(false, "\"error\":\"lsm unavailable\"");
-    long long cur = cli.decr("pylite:inflight:" + std::string(node_id, nLen));
+    long long cur = cli.decr("xmex:inflight:" + std::string(node_id, nLen));
     if (cur < 0) cur = 0;
     std::ostringstream ex;
     ex << "\"inflight\":" << cur;
@@ -131,10 +131,10 @@ lite::Value kv_done(const char* node_id, int64_t nLen) {
 }
 
 // kv.qlen(queue) → 查询队列积压长度
-lite::Value kv_qlen(const char* queue, int64_t qLen) {
+xmex::Value kv_qlen(const char* queue, int64_t qLen) {
     auto cli = make_client();
     if (!cli.ok()) return json_result(false, "\"error\":\"lsm unavailable\"");
-    long long n = cli.llen("pylite:mq:" + std::string(queue, qLen));
+    long long n = cli.llen("xmex:mq:" + std::string(queue, qLen));
     if (n < 0) n = 0;
     std::ostringstream ex;
     ex << "\"qlen\":" << n;
@@ -142,17 +142,17 @@ lite::Value kv_qlen(const char* queue, int64_t qLen) {
 }
 
 // kv.set_quota(node_id, quota) → 设置节点配额上限(quota 为数字字符串)
-lite::Value kv_set_quota(const char* node_id, int64_t nLen,
+xmex::Value kv_set_quota(const char* node_id, int64_t nLen,
                         const char* quota, int64_t qLen) {
     auto cli = make_client();
     if (!cli.ok()) return json_result(false, "\"error\":\"lsm unavailable\"");
-    bool ok = cli.set("pylite:quota:" + std::string(node_id, nLen), std::string(quota, qLen));
+    bool ok = cli.set("xmex:quota:" + std::string(node_id, nLen), std::string(quota, qLen));
     return json_result(ok, ok ? "" : "\"error\":\"set failed\"");
 }
 
 // ---- 通用 KV 读写(节点存取任务内容,2026-10 增补) ----
 // kv.kset(key, value) → 写入任意键值
-lite::Value kv_kset(const char* key, int64_t kLen,
+xmex::Value kv_kset(const char* key, int64_t kLen,
                    const char* value, int64_t vLen) {
     auto cli = make_client();
     if (!cli.ok()) return json_result(false, "\"error\":\"lsm unavailable\"");
@@ -161,7 +161,7 @@ lite::Value kv_kset(const char* key, int64_t kLen,
 }
 
 // kv.kget(key) → 读取键对应的值,不存在返回空串
-lite::Value kv_kget(const char* key, int64_t kLen) {
+xmex::Value kv_kget(const char* key, int64_t kLen) {
     auto cli = make_client();
     if (!cli.ok()) return str_new("", 0);
     std::string val;
@@ -172,7 +172,7 @@ lite::Value kv_kget(const char* key, int64_t kLen) {
 
 // ---- 本地文件写入(节点落盘代码供编译,2026-10 增补) ----
 // fwrite(path, content) → 写入本地文件,返回 {"success":true}
-lite::Value file_write(const char* path, int64_t pLen,
+xmex::Value file_write(const char* path, int64_t pLen,
                       const char* content, int64_t cLen) {
     std::string p(path, pLen);
     FILE* f = std::fopen(p.c_str(), "wb");
@@ -184,7 +184,7 @@ lite::Value file_write(const char* path, int64_t pLen,
 }
 
 // fread(path) → 读取本地文件全部内容,不存在返回空串
-lite::Value file_read(const char* path, int64_t pLen) {
+xmex::Value file_read(const char* path, int64_t pLen) {
     std::string p(path, pLen);
     FILE* f = std::fopen(p.c_str(), "rb");
     if (!f) return str_new("", 0);
@@ -205,26 +205,26 @@ int64_t str_to_int(const char* s, int64_t n) {
 }
 
 // int_to_str(v) → 整数转字符串,供拼接 task:{id}:in:{i} 等键使用
-lite::Value int_to_str(int64_t v) {
+xmex::Value int_to_str(int64_t v) {
     char buf[32];
     int n = std::snprintf(buf, sizeof(buf), "%lld", static_cast<long long>(v));
     return str_new(buf, n);
 }
 
 // kv.quota(node_id) → 查询节点配额与当前在评数
-lite::Value kv_quota(const char* node_id, int64_t nLen) {
+xmex::Value kv_quota(const char* node_id, int64_t nLen) {
     auto cli = make_client();
     if (!cli.ok()) return json_result(false, "\"error\":\"lsm unavailable\"");
     std::string node(node_id, nLen);
     std::string qs;
     long long quota = 1;
-    if (cli.get("pylite:quota:" + node, qs) && !qs.empty()) {
+    if (cli.get("xmex:quota:" + node, qs) && !qs.empty()) {
         quota = std::atoll(qs.c_str());
         if (quota <= 0) quota = 1;
     }
     std::string inf;
     long long inflight = 0;
-    if (cli.get("pylite:inflight:" + node, inf) && !inf.empty()) {
+    if (cli.get("xmex:inflight:" + node, inf) && !inf.empty()) {
         inflight = std::atoll(inf.c_str());
     }
     std::ostringstream ex;

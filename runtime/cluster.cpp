@@ -161,7 +161,7 @@ static RemoteResult http_request(const std::string& method,
         return result;
     }
     SSL *ssl = nullptr;
-    if (!std::getenv("PYLITE_NO_TLS")) {
+    if (!std::getenv("XMEX_NO_TLS")) {
         clientTlsInit();
         if (g_clientTlsEnabled) {
             ssl = SSL_new(g_clientTlsCtx);

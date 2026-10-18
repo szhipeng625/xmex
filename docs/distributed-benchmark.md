@@ -1,4 +1,4 @@
-# PyLite 分布式集群压测报告
+# Xmex 分布式集群压测报告
 
 > 日期：2026-10-10　压测端：node-kimi
 
@@ -82,7 +82,7 @@
 
 ## 十、相关命令
 
-- 编译带追踪的节点程序：`pylitec <node>.pys -o <node>.o`
+- 编译带追踪的节点程序：`xmexc <node>.pys -o <node>.o`
 - 启用加密监听：脚本中调用 `server.tls(cert, key)`
 - 并发压测：`python3 bench_dist_tls.py`
-- 关闭追踪（压测专用）：`pylitec ... --no-trace`
+- 关闭追踪（压测专用）：`xmexc ... --no-trace`

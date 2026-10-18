@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PyLite 在线编译器</title>
+<title>Xmex 在线编译器</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0d1117;color:#e6edf3;min-height:100vh;display:flex;flex-direction:column}
@@ -50,7 +50,7 @@ footer{padding:8px 28px;font-size:12px;color:#6e7681;background:#161b22;border-t
 </head>
 <body>
 <header>
-<h1>PyLite 在线编译器</h1>
+<h1>Xmex 在线编译器</h1>
 <span class="sub">基于 LLVM 的 Python 系语言编译器 · 支持代码补全与内置函数速查</span>
 </header>
 <div class="toolbar">
@@ -75,10 +75,10 @@ footer{padding:8px 28px;font-size:12px;color:#6e7681;background:#161b22;border-t
 <div id="output">点击『运行』执行左侧代码...</div>
 </div>
 </div>
-<footer>PyLite Compiler · 代码补全仅作提示不限制输入 · 编译+链接+运行在服务端沙箱完成</footer>
+<footer>Xmex Compiler · 代码补全仅作提示不限制输入 · 编译+链接+运行在服务端沙箱完成</footer>
 <div id="docPanel">
 <div class="doc-head">
-<h2>PyLite 内置函数与模块操作全览</h2>
+<h2>Xmex 内置函数与模块操作全览</h2>
 <button class="doc-close" id="docClose">关闭</button>
 </div>
 <div class="doc-body" id="docBody"></div>
@@ -144,7 +144,7 @@ const MODULES = {
     ["connect(name, addr, secret)", "加入集群；三个参数均为字符串，addr 形如 \"IP:端口\""],["disconnect(name)", "断开集群；name 字符串"],["list()", "列出全部集群"],["is_connected(name)", "是否已连接；返回布尔"],["status(name)", "集群状态"],["nodes(name)", "集群节点列表"],["health(name)", "集群健康检查；返回布尔"],["exec(name, cmd_type, payload)", "集群执行命令；三个参数均为字符串"],["query(name, path)", "集群查询；path 字符串(查询路径)"],["broadcast(cmd_type, payload)", "集群广播；两个参数均为字符串"],["health_all()", "全部集群健康检查"]
   ]},
   kv: { desc: "KV 节点与存储", fns: [
-    ["build(node_id, binary, args_json, work_dir, addr)", "构建 KV 节点；五个参数均为字符串，args_json 为 JSON 数组文本（如空数组），addr 形如 \"IP:端口\""],["add(node_id, binary, args_json, work_dir, addr)", "添加节点；格式同 build"],["erase(node_id)", "删除节点"],["skip(node_id)", "跳过节点"],["sleep(node_id)", "休眠节点"],["wakeup(node_id)", "唤醒节点"],["stop(node_id)", "停止节点"],["restart(node_id)", "重启节点"],["status(node_id)", "节点状态"],["list()", "节点列表"],["alive(node_id)", "节点存活检查；返回布尔"],["bind_sandbox(node_id, ...)", "绑定沙箱"],["get_sandbox(node_id)", "获取绑定的沙箱"],["unbind_sandbox(node_id)", "解绑沙箱"],["add_box(node_id, box, addr)", "添加盒子；box 为值对象(任意类型)，addr 字符串"],["locate(box)", "定位盒子所在节点；box 为值对象"],["self()", "当前节点标识(读取环境变量 PYLITE_NODE_ID)"],["iter()", "创建迭代器，返回迭代器对象"],["next(it)", "迭代器前移；it 为 iter() 返回的对象"],["rewind(it)", "重置迭代器"],["iter_destroy(it)", "销毁迭代器"],["iter_live(it)", "迭代器是否有效；返回布尔"]
+    ["build(node_id, binary, args_json, work_dir, addr)", "构建 KV 节点；五个参数均为字符串，args_json 为 JSON 数组文本（如空数组），addr 形如 \"IP:端口\""],["add(node_id, binary, args_json, work_dir, addr)", "添加节点；格式同 build"],["erase(node_id)", "删除节点"],["skip(node_id)", "跳过节点"],["sleep(node_id)", "休眠节点"],["wakeup(node_id)", "唤醒节点"],["stop(node_id)", "停止节点"],["restart(node_id)", "重启节点"],["status(node_id)", "节点状态"],["list()", "节点列表"],["alive(node_id)", "节点存活检查；返回布尔"],["bind_sandbox(node_id, ...)", "绑定沙箱"],["get_sandbox(node_id)", "获取绑定的沙箱"],["unbind_sandbox(node_id)", "解绑沙箱"],["add_box(node_id, box, addr)", "添加盒子；box 为值对象(任意类型)，addr 字符串"],["locate(box)", "定位盒子所在节点；box 为值对象"],["self()", "当前节点标识(读取环境变量 XMEX_NODE_ID)"],["iter()", "创建迭代器，返回迭代器对象"],["next(it)", "迭代器前移；it 为 iter() 返回的对象"],["rewind(it)", "重置迭代器"],["iter_destroy(it)", "销毁迭代器"],["iter_live(it)", "迭代器是否有效；返回布尔"]
   ]}
 };
 const EXAMPLES = {
@@ -344,7 +344,7 @@ print("关闭后 status:", kv.status("demo-node"))
 # 节点服务监听 TLS 加密通道，集群连接走 HTTP
 # 注意：跨机连接需目标节点已启动且端口放行
 
-SECRET = "pylite-cluster-2026"
+SECRET = "xmex-cluster-2026"
 
 # 1. 连接本机节点（回环地址，安全组不拦截）
 print("=== 连接本机节点 alytun ===")
@@ -529,7 +529,7 @@ runBtn.addEventListener("click", async () => {
   statusEl.textContent = "编译运行中...";
   output.innerHTML = "<span style='color:#8b949e'>正在提交到服务端编译执行，请稍候...</span>";
   try {
-    const resp = await fetch("/pylite_run/api/run", {
+    const resp = await fetch("/xmex_run/api/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code: editor.value })

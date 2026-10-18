@@ -1,4 +1,4 @@
-// PyLite 词法单元定义。
+// Xmex 词法单元定义。
 //
 // 这是一门缩进敏感的语言,所以除了常见的 token 之外还有三个特殊标记:
 //   NEWLINE —— 逻辑行结束
@@ -11,7 +11,7 @@
 #include <string>
 #include <string_view>
 
-namespace pylite {
+namespace xmex {
 
 enum class Tok : uint8_t {
   EndOfFile,
@@ -65,4 +65,4 @@ struct Token {
   bool is(Tok k) const { return kind == k; }
 };
 
-}  // namespace pylite
+}  // namespace xmex

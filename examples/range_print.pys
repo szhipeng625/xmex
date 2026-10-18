@@ -1,4 +1,4 @@
-# PyLite 示例 —— 用户最初提出的写法。
+# Xmex 示例 —— 用户最初提出的写法。
 # 读取两个整数,打印从 1 到 a 的每个数。
 a, b = input(int, int)
 for i in range(1, a):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# PyLite 性能对比测试：前 5 分钟关闭优化，后 5 分钟开启优化
+# Xmex 性能对比测试：前 5 分钟关闭优化，后 5 分钟开启优化
 # 每分钟采集一次，实时推送至监控页面
 import json
 import os
@@ -8,17 +8,17 @@ import random
 import subprocess
 import datetime
 
-WORK = "/tmp/pylite_abtest"
+WORK = "/tmp/xmex_abtest"
 os.makedirs(WORK, exist_ok=True)
 HIST = os.path.join(WORK, "history.json")
 
 REMOTE = "root@47.253.41.10"
-REMOTE_DIR = "/usr/share/nginx/html/pylite/data"
+REMOTE_DIR = "/usr/share/nginx/html/xmex/data"
 
 TOTAL_MINUTES = 10
 SWITCH_MINUTE = 5  # 第 5 分钟切换到优化开启
 
-# 未优化基线（关闭 PyLite）
+# 未优化基线（关闭 Xmex）
 BASE_OFF = {
     "throughput": 1250.0,
     "latency": 0.80,
@@ -27,7 +27,7 @@ BASE_OFF = {
     "kernels": 528,
 }
 
-# 优化后基线（开启 PyLite）
+# 优化后基线（开启 Xmex）
 BASE_ON = {
     "throughput": 1719.0,
     "latency": 0.58,
@@ -83,8 +83,8 @@ def main():
         if idx >= TOTAL_MINUTES:
             break
 
-        pylite_on = idx >= SWITCH_MINUTE
-        base = BASE_ON if pylite_on else BASE_OFF
+        xmex_on = idx >= SWITCH_MINUTE
+        base = BASE_ON if xmex_on else BASE_OFF
         now = datetime.datetime.now()
         g = gpu_now()
 
@@ -104,7 +104,7 @@ def main():
             "kernels": kernels,
             "req": req,
             "gpu": g["util"],
-            "pylite": pylite_on,
+            "xmex": xmex_on,
         }
         hist.append(rec)
         idx += 1
@@ -121,10 +121,10 @@ def main():
             "kernel_launches": [h["kernels"] for h in hist],
             "active_reqs": [h["req"] for h in hist],
             "gpu_util": [h["gpu"] for h in hist],
-            "pylite_enabled": [h["pylite"] for h in hist],
+            "xmex_enabled": [h["xmex"] for h in hist],
             "last_updated": now.strftime("%Y-%m-%d %H:%M:%S"),
-            "test_phase": "optimized" if pylite_on else "baseline",
-            "source": "kimi/PyLite",
+            "test_phase": "optimized" if xmex_on else "baseline",
+            "source": "kimi/Xmex",
         }
         with open(os.path.join(WORK, "chart_data.json"), "w") as f:
             json.dump(chart, f, ensure_ascii=False)
@@ -143,10 +143,10 @@ def main():
             "gpu_temp_c": g["temp"],
             "gpu_power_w": g["power"],
             "engine_status": "running",
-            "pylite_enabled": pylite_on,
+            "xmex_enabled": xmex_on,
             "model_name": "DeepSeek-R1-14B-AWQ",
             "source_host": "kimi",
-            "test_phase": "optimized" if pylite_on else "baseline",
+            "test_phase": "optimized" if xmex_on else "baseline",
         }
         with open(os.path.join(WORK, "metrics.json"), "w") as f:
             json.dump(metrics, f, ensure_ascii=False)
@@ -156,7 +156,7 @@ def main():
            + os.path.join(WORK, "metrics.json") + " "
            + REMOTE + ":" + REMOTE_DIR + "/", timeout=20)
 
-        phase = "优化开启" if pylite_on else "优化关闭"
+        phase = "优化开启" if xmex_on else "优化关闭"
         print("[%s] 第%d分钟 [%s] %d tok/s, %.2f ms, cache %d%%"
               % (now.strftime("%H:%M:%S"), idx, phase, thr, lat, cache), flush=True)
 

@@ -1,6 +1,6 @@
 #include "kv_admin.h"
 #include "cluster.h"
-#include "../include/pylite/runtime.h"
+#include "../include/xmex/runtime.h"
 #include <cstring>
 #include <sstream>
 #include <cstdlib>
@@ -30,7 +30,7 @@ static std::string node_to_json(const KvNode& n) {
 }
 
 // 辅助：执行操作并返回 JSON 结果
-static lite::Value op_result(const char* op, const std::string& node_id, bool ok, const std::string& error) {
+static xmex::Value op_result(const char* op, const std::string& node_id, bool ok, const std::string& error) {
     std::ostringstream json;
     json << "{";
     json << "\"op\":\"" << op << "\",";
@@ -54,7 +54,7 @@ static std::mutex g_node_sandbox_mutex;
 static std::map<int64_t, std::string> g_sandbox_node_map;
 
 // kv.build(node_id, binary, args_json, work_dir, addr) → 建立节点并启动
-lite::Value kv_build(const char *node_id, int64_t idLen,
+xmex::Value kv_build(const char *node_id, int64_t idLen,
                     const char *binary, int64_t binLen,
                     const char *args_json, int64_t argsLen,
                     const char *work_dir, int64_t dirLen,
@@ -83,7 +83,7 @@ lite::Value kv_build(const char *node_id, int64_t idLen,
 }
 
 // kv.add(node_id, binary, args_json, work_dir, addr) → 向集群追加节点
-lite::Value kv_add(const char *node_id, int64_t idLen,
+xmex::Value kv_add(const char *node_id, int64_t idLen,
                   const char *binary, int64_t binLen,
                   const char *args_json, int64_t argsLen,
                   const char *work_dir, int64_t dirLen,
@@ -113,7 +113,7 @@ lite::Value kv_add(const char *node_id, int64_t idLen,
 // kv.erase(node_id) → 永久移除节点
 // 销毁节点时同步清理双向映射:正向(node->handle)与反向(handle->node)一并清除,
 // 保证 erase 后 get_sandbox 返回 -1 且 locate(box) 不再找到该节点。
-lite::Value kv_erase(const char *node_id, int64_t idLen) {
+xmex::Value kv_erase(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
     std::string error;
     bool ok = KvAdmin::instance().erase(id, error);
@@ -129,7 +129,7 @@ lite::Value kv_erase(const char *node_id, int64_t idLen) {
 }
 
 // kv.skip(node_id) → 逻辑跳过（标记 LOST）
-lite::Value kv_skip(const char *node_id, int64_t idLen) {
+xmex::Value kv_skip(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
     std::string error;
     bool ok = KvAdmin::instance().skip(id, error);
@@ -137,7 +137,7 @@ lite::Value kv_skip(const char *node_id, int64_t idLen) {
 }
 
 // kv.sleep(node_id) → 暂停节点（SIGSTOP）
-lite::Value kv_sleep(const char *node_id, int64_t idLen) {
+xmex::Value kv_sleep(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
     std::string error;
     bool ok = KvAdmin::instance().sleep_node(id, error);
@@ -145,7 +145,7 @@ lite::Value kv_sleep(const char *node_id, int64_t idLen) {
 }
 
 // kv.wakeup(node_id) → 唤醒节点（SIGCONT）
-lite::Value kv_wakeup(const char *node_id, int64_t idLen) {
+xmex::Value kv_wakeup(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
     std::string error;
     bool ok = KvAdmin::instance().wakeup(id, error);
@@ -153,7 +153,7 @@ lite::Value kv_wakeup(const char *node_id, int64_t idLen) {
 }
 
 // kv.stop(node_id) → 停止节点（保留注册）
-lite::Value kv_stop(const char *node_id, int64_t idLen) {
+xmex::Value kv_stop(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
     std::string error;
     bool ok = KvAdmin::instance().stop(id, error);
@@ -161,7 +161,7 @@ lite::Value kv_stop(const char *node_id, int64_t idLen) {
 }
 
 // kv.restart(node_id) → 重启节点
-lite::Value kv_restart(const char *node_id, int64_t idLen) {
+xmex::Value kv_restart(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
     std::string error;
     bool ok = KvAdmin::instance().restart(id, error);
@@ -169,7 +169,7 @@ lite::Value kv_restart(const char *node_id, int64_t idLen) {
 }
 
 // kv.status(node_id) → 节点详情 JSON
-lite::Value kv_status(const char *node_id, int64_t idLen) {
+xmex::Value kv_status(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
     KvNode node;
     if (!KvAdmin::instance().get_node(id, node)) {
@@ -180,7 +180,7 @@ lite::Value kv_status(const char *node_id, int64_t idLen) {
 }
 
 // kv.list() → 所有节点列表 JSON
-lite::Value kv_list() {
+xmex::Value kv_list() {
     auto nodes = KvAdmin::instance().list_nodes();
     std::ostringstream json;
     json << "[";
@@ -201,7 +201,7 @@ int64_t kv_alive(const char *node_id, int64_t idLen) {
 
 // kv.persist(addr) → 配置 LSM 持久化后端(如 "43.157.39.171:6380")并恢复注册表
 // addr 为空串则关闭持久化。配置后节点变更自动写入 LSM,进程重启自动恢复。
-lite::Value kv_persist(const char *addr, int64_t addrLen) {
+xmex::Value kv_persist(const char *addr, int64_t addrLen) {
     std::string a(addr, addrLen);
     KvAdmin::instance().configure_persistence(a);
     if (!a.empty()) {
@@ -250,10 +250,10 @@ int64_t kv_unbind_sandbox(const char *node_id, int64_t idLen) {
 extern "C" {
 
 // 从 box 实例中取 handle 属性;box 非实例或缺属性时返回 -1
-static int64_t box_handle_of(const lite::Value* box) {
+static int64_t box_handle_of(const xmex::Value* box) {
     if (!box) return -1;
-    lite::Value h = instance_get_attr(box, "handle", 6);
-    if (h.tag != lite::kInt) return -1;
+    xmex::Value h = instance_get_attr(box, "handle", 6);
+    if (h.tag != xmex::kInt) return -1;
     return h.as.i;
 }
 
@@ -261,8 +261,8 @@ static int64_t box_handle_of(const lite::Value* box) {
 // addr 为空串则本地启动(进程就放进 box 沙箱里),填 host:port 则登记为远程节点。
 // 同时维护正向(node->handle)与反向(handle->node)双向映射,
 // 使容器内可以用 kv.locate(box) 定位到 kv->box 的归属关系。
-lite::Value kv_add_box(const char *node_id, int64_t idLen,
-                      const lite::Value *box,
+xmex::Value kv_add_box(const char *node_id, int64_t idLen,
+                      const xmex::Value *box,
                       const char *addr, int64_t addrLen) {
     std::string id(node_id, idLen);
     std::string a(addr, addrLen);
@@ -273,8 +273,8 @@ lite::Value kv_add_box(const char *node_id, int64_t idLen,
     // 从盒子配置里取真实登记的二进制路径(add_box 前用 sandbox.set_binary 设置)
     std::string binary;
     {
-        lite::Value bv = sandbox_binary_path(handle);
-        if (bv.tag == lite::kStr) {
+        xmex::Value bv = sandbox_binary_path(handle);
+        if (bv.tag == xmex::kStr) {
             binary.assign(str_data(&bv), str_size(&bv));
         }
     }
@@ -290,8 +290,8 @@ lite::Value kv_add_box(const char *node_id, int64_t idLen,
         ClusterManager& cm = ClusterManager::instance();
         std::string cname = "auto-" + a;
         if (!cm.is_connected(cname)) {
-            const char* sec = std::getenv("PYLITE_CLUSTER_SECRET");
-            cm.connect(cname, a, sec ? sec : "pylite-secret");
+            const char* sec = std::getenv("XMEX_CLUSTER_SECRET");
+            cm.connect(cname, a, sec ? sec : "xmex-secret");
         }
         std::ostringstream payload;
         payload << "{\"node_id\":\"" << id << "\","
@@ -313,7 +313,7 @@ lite::Value kv_add_box(const char *node_id, int64_t idLen,
 
 // kv.locate(box) —— 由盒子反查所属 kv 节点的 kv->box 绑定关系。
 // 返回 {node_id, handle, addr, state},未绑定返回 {node_id:"",found:false}
-lite::Value kv_locate(const lite::Value *box) {
+xmex::Value kv_locate(const xmex::Value *box) {
     int64_t handle = box_handle_of(box);
     std::string id;
     {
@@ -339,11 +339,11 @@ lite::Value kv_locate(const lite::Value *box) {
     return str_new(s.c_str(), s.size());
 }
 
-// kv.self() —— 容器内定位:读启动时注入的 PYLITE_NODE_ID/ADDR,
+// kv.self() —— 容器内定位:读启动时注入的 XMEX_NODE_ID/ADDR,
 // 让盒子里运行的代码知道自己属于哪个 kv 节点。未注入返回 {found:false}
-lite::Value kv_self() {
-    const char* id = std::getenv("PYLITE_NODE_ID");
-    const char* addr = std::getenv("PYLITE_NODE_ADDR");
+xmex::Value kv_self() {
+    const char* id = std::getenv("XMEX_NODE_ID");
+    const char* addr = std::getenv("XMEX_NODE_ADDR");
     std::ostringstream json;
     if (!id) {
         json << "{\"found\":false}";
@@ -385,7 +385,7 @@ static std::mutex g_kv_iter_mutex;
 extern "C" {
 
 // 迭代器实例的 next 方法处理:for 迭代协议经实例方法分派表路由到这里
-static lite::Value kv_iter_next_method(const lite::Value *inst, lite::Value *args, int64_t nargs) {
+static xmex::Value kv_iter_next_method(const xmex::Value *inst, xmex::Value *args, int64_t nargs) {
     (void)args; (void)nargs;
     return kv_iter_next(inst);
 }
@@ -399,7 +399,7 @@ static void ensure_iter_methods_registered() {
 }
 
 // kv.iter() → 创建节点迭代器实例(快照当前节点列表)
-lite::Value kv_iter() {
+xmex::Value kv_iter() {
     ensure_iter_methods_registered();
     auto nodes = KvAdmin::instance().list_nodes();
     std::lock_guard<std::mutex> lk(g_kv_iter_mutex);
@@ -408,29 +408,29 @@ lite::Value kv_iter() {
     for (const auto& n : nodes) st.items.push_back(node_to_json(n));
     g_kv_iters[handle] = st;
     // 构造实例属性: handle + type + count
-    lite::Value attrs = dict_new(nullptr, nullptr, 0);
-    lite::Value k1 = str_new("handle", 6);
-    lite::Value v1 = int_(handle);
+    xmex::Value attrs = dict_new(nullptr, nullptr, 0);
+    xmex::Value k1 = str_new("handle", 6);
+    xmex::Value v1 = int_(handle);
     dict_set(&attrs, &k1, &v1);
-    lite::Value k2 = str_new("type", 4);
-    lite::Value v2 = str_new("kv_iter", 7);
+    xmex::Value k2 = str_new("type", 4);
+    xmex::Value v2 = str_new("kv_iter", 7);
     dict_set(&attrs, &k2, &v2);
-    lite::Value k3 = str_new("count", 5);
-    lite::Value v3 = int_(static_cast<int64_t>(st.items.size()));
+    xmex::Value k3 = str_new("count", 5);
+    xmex::Value v3 = int_(static_cast<int64_t>(st.items.size()));
     dict_set(&attrs, &k3, &v3);
     return instance_new(KV_ITER_CLASS_ID, &attrs);
 }
 
 // 从迭代器实例中取 handle
-static int64_t kv_iter_handle_of(const lite::Value* it) {
+static int64_t kv_iter_handle_of(const xmex::Value* it) {
     if (!it) return -1;
-    lite::Value h = instance_get_attr(it, "handle", 6);
-    if (h.tag != lite::kInt) return -1;
+    xmex::Value h = instance_get_attr(it, "handle", 6);
+    if (h.tag != xmex::kInt) return -1;
     return h.as.i;
 }
 
 // kv.next(it) → 取下一个节点信息字符串; 迭代结束返回 None
-lite::Value kv_iter_next(const lite::Value* it) {
+xmex::Value kv_iter_next(const xmex::Value* it) {
     int64_t handle = kv_iter_handle_of(it);
     std::lock_guard<std::mutex> lk(g_kv_iter_mutex);
     auto itr = g_kv_iters.find(handle);
@@ -449,7 +449,7 @@ lite::Value kv_iter_next(const lite::Value* it) {
 }
 
 // kv.rewind(it) → 重置游标到开头, 返回剩余元素个数
-lite::Value kv_iter_rewind(const lite::Value* it) {
+xmex::Value kv_iter_rewind(const xmex::Value* it) {
     int64_t handle = kv_iter_handle_of(it);
     std::lock_guard<std::mutex> lk(g_kv_iter_mutex);
     auto itr = g_kv_iters.find(handle);
@@ -461,24 +461,24 @@ lite::Value kv_iter_rewind(const lite::Value* it) {
 // kv.iter_live() → 实时迭代器:不做快照,next 时实时查询节点列表。
 // 与 kv.iter 的快照语义互补:迭代期间节点的增删立即可见,
 // 代价是每次 next 都要拿一次管理器锁。
-lite::Value kv_iter_live() {
+xmex::Value kv_iter_live() {
     ensure_iter_methods_registered();
     std::lock_guard<std::mutex> lk(g_kv_iter_mutex);
     int64_t handle = g_kv_iter_next_handle++;
     KvIterState st;   // items 留空,作为 live 标记
     g_kv_iters[handle] = st;
-    lite::Value attrs = dict_new(nullptr, nullptr, 0);
-    lite::Value k1 = str_new("handle", 6);
-    lite::Value v1 = int_(handle);
+    xmex::Value attrs = dict_new(nullptr, nullptr, 0);
+    xmex::Value k1 = str_new("handle", 6);
+    xmex::Value v1 = int_(handle);
     dict_set(&attrs, &k1, &v1);
-    lite::Value k2 = str_new("type", 4);
-    lite::Value v2 = str_new("kv_iter_live", 12);
+    xmex::Value k2 = str_new("type", 4);
+    xmex::Value v2 = str_new("kv_iter_live", 12);
     dict_set(&attrs, &k2, &v2);
     return instance_new(KV_ITER_CLASS_ID, &attrs);
 }
 
 // kv.iter_destroy(it) → 销毁迭代器, 释放快照
-lite::Value kv_iter_destroy(const lite::Value* it) {
+xmex::Value kv_iter_destroy(const xmex::Value* it) {
     int64_t handle = kv_iter_handle_of(it);
     std::lock_guard<std::mutex> lk(g_kv_iter_mutex);
     g_kv_iters.erase(handle);

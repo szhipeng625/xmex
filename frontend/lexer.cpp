@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <unordered_map>
 
-namespace pylite {
+namespace xmex {
 
 const char *tokName(Tok t) {
   switch (t) {
@@ -363,4 +363,4 @@ void Lexer::lexOperator() {
   }
 }
 
-}  // namespace pylite
+}  // namespace xmex

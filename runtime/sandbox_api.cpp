@@ -1,5 +1,5 @@
 #include "sandbox.h"
-#include "../include/pylite/runtime.h"
+#include "../include/xmex/runtime.h"
 #include <unordered_map>
 #include <mutex>
 #include <unistd.h>
@@ -16,32 +16,32 @@ static const int64_t SANDBOX_CLASS_ID = 2;
 
 extern "C" {
 
-// 创建沙箱实例，返回 lite::kInstance 对象
-lite::Value sandbox_create() {
+// 创建沙箱实例，返回 xmex::kInstance 对象
+xmex::Value sandbox_create() {
     std::lock_guard<std::mutex> lk(g_sandbox_mutex);
     int64_t handle = g_next_handle++;
     g_sandbox_configs[handle] = SandboxConfig{};
     // 创建属性字典，存入句柄
-    lite::Value attrs = dict_new(nullptr, nullptr, 0);
-    lite::Value k = str_new("handle", 6);
-    lite::Value v = int_(handle);
+    xmex::Value attrs = dict_new(nullptr, nullptr, 0);
+    xmex::Value k = str_new("handle", 6);
+    xmex::Value v = int_(handle);
     dict_set(&attrs, &k, &v);
     // 存入类型名
-    lite::Value tk = str_new("type", 4);
-    lite::Value tv = str_new("sandbox", 7);
+    xmex::Value tk = str_new("type", 4);
+    xmex::Value tv = str_new("sandbox", 7);
     dict_set(&attrs, &tk, &tv);
     return instance_new(SANDBOX_CLASS_ID, &attrs);
 }
 
 // 从沙箱实例中提取句柄
-static int64_t get_handle(const lite::Value* inst) {
-    if (!inst || inst->tag != 9) return -1;  // lite::kInstance = 9
-    lite::Value k = str_new("handle", 6);
-    lite::Value v = instance_get_attr(inst, "handle", 6);
+static int64_t get_handle(const xmex::Value* inst) {
+    if (!inst || inst->tag != 9) return -1;  // xmex::kInstance = 9
+    xmex::Value k = str_new("handle", 6);
+    xmex::Value v = instance_get_attr(inst, "handle", 6);
     return as_int(v);
 }
 
-void sandbox_set_cpu_limit(const lite::Value* inst, uint32_t cpu_limit_ms) {
+void sandbox_set_cpu_limit(const xmex::Value* inst, uint32_t cpu_limit_ms) {
     int64_t handle = get_handle(inst);
     std::lock_guard<std::mutex> lk(g_sandbox_mutex);
     auto it = g_sandbox_configs.find(handle);
@@ -50,7 +50,7 @@ void sandbox_set_cpu_limit(const lite::Value* inst, uint32_t cpu_limit_ms) {
     }
 }
 
-void sandbox_set_mem_limit(const lite::Value* inst, uint64_t mem_limit_bytes) {
+void sandbox_set_mem_limit(const xmex::Value* inst, uint64_t mem_limit_bytes) {
     int64_t handle = get_handle(inst);
     std::lock_guard<std::mutex> lk(g_sandbox_mutex);
     auto it = g_sandbox_configs.find(handle);
@@ -59,7 +59,7 @@ void sandbox_set_mem_limit(const lite::Value* inst, uint64_t mem_limit_bytes) {
     }
 }
 
-void sandbox_set_max_pids(const lite::Value* inst, int64_t max_pids) {
+void sandbox_set_max_pids(const xmex::Value* inst, int64_t max_pids) {
     int64_t handle = get_handle(inst);
     std::lock_guard<std::mutex> lk(g_sandbox_mutex);
     auto it = g_sandbox_configs.find(handle);
@@ -69,7 +69,7 @@ void sandbox_set_max_pids(const lite::Value* inst, int64_t max_pids) {
 }
 
 // 关闭系统调用过滤(编译等可信阶段使用,2026-10 增补)
-void sandbox_set_no_seccomp(const lite::Value* inst, int64_t flag) {
+void sandbox_set_no_seccomp(const xmex::Value* inst, int64_t flag) {
     int64_t handle = get_handle(inst);
     std::lock_guard<std::mutex> lk(g_sandbox_mutex);
     auto it = g_sandbox_configs.find(handle);
@@ -78,7 +78,7 @@ void sandbox_set_no_seccomp(const lite::Value* inst, int64_t flag) {
     }
 }
 
-void sandbox_set_work_dir(const lite::Value* inst, const char *path, int64_t pathLen) {
+void sandbox_set_work_dir(const xmex::Value* inst, const char *path, int64_t pathLen) {
     int64_t handle = get_handle(inst);
     std::lock_guard<std::mutex> lk(g_sandbox_mutex);
     auto it = g_sandbox_configs.find(handle);
@@ -88,7 +88,7 @@ void sandbox_set_work_dir(const lite::Value* inst, const char *path, int64_t pat
 }
 
 // 按 handle 取盒子登记的二进制路径(供 kv.add_box 使用,2026-10 增补)
-lite::Value sandbox_binary_path(int64_t handle) {
+xmex::Value sandbox_binary_path(int64_t handle) {
     std::lock_guard<std::mutex> lk(g_sandbox_mutex);
     auto it = g_sandbox_configs.find(handle);
     if (it == g_sandbox_configs.end()) return str_new("", 0);
@@ -96,7 +96,7 @@ lite::Value sandbox_binary_path(int64_t handle) {
     return str_new(p.c_str(), p.size());
 }
 
-void sandbox_set_binary(const lite::Value* inst, const char *path, int64_t pathLen) {
+void sandbox_set_binary(const xmex::Value* inst, const char *path, int64_t pathLen) {
     int64_t handle = get_handle(inst);
     std::lock_guard<std::mutex> lk(g_sandbox_mutex);
     auto it = g_sandbox_configs.find(handle);
@@ -105,7 +105,7 @@ void sandbox_set_binary(const lite::Value* inst, const char *path, int64_t pathL
     }
 }
 
-void sandbox_add_arg(const lite::Value* inst, const char *arg, int64_t argLen) {
+void sandbox_add_arg(const xmex::Value* inst, const char *arg, int64_t argLen) {
     int64_t handle = get_handle(inst);
     std::lock_guard<std::mutex> lk(g_sandbox_mutex);
     auto it = g_sandbox_configs.find(handle);
@@ -114,7 +114,7 @@ void sandbox_add_arg(const lite::Value* inst, const char *arg, int64_t argLen) {
     }
 }
 
-void sandbox_set_stdin(const lite::Value* inst, const char *path, int64_t pathLen) {
+void sandbox_set_stdin(const xmex::Value* inst, const char *path, int64_t pathLen) {
     int64_t handle = get_handle(inst);
     std::lock_guard<std::mutex> lk(g_sandbox_mutex);
     auto it = g_sandbox_configs.find(handle);
@@ -123,7 +123,7 @@ void sandbox_set_stdin(const lite::Value* inst, const char *path, int64_t pathLe
     }
 }
 
-void sandbox_set_stdout(const lite::Value* inst, const char *path, int64_t pathLen) {
+void sandbox_set_stdout(const xmex::Value* inst, const char *path, int64_t pathLen) {
     int64_t handle = get_handle(inst);
     std::lock_guard<std::mutex> lk(g_sandbox_mutex);
     auto it = g_sandbox_configs.find(handle);
@@ -132,7 +132,7 @@ void sandbox_set_stdout(const lite::Value* inst, const char *path, int64_t pathL
     }
 }
 
-void sandbox_set_stderr(const lite::Value* inst, const char *path, int64_t pathLen) {
+void sandbox_set_stderr(const xmex::Value* inst, const char *path, int64_t pathLen) {
     int64_t handle = get_handle(inst);
     std::lock_guard<std::mutex> lk(g_sandbox_mutex);
     auto it = g_sandbox_configs.find(handle);
@@ -145,7 +145,7 @@ void sandbox_set_stderr(const lite::Value* inst, const char *path, int64_t pathL
 //   >= 0   子进程真实退出码(0 表示成功)
 //   -1     配置缺失或 fork 失败
 //   -124   执行超过 cpu_limit_ms,子进程被终止(与 coreutils timeout 的 124 对齐,便于判题识别 TLE)
-int64_t sandbox_exec(const lite::Value* inst) {
+int64_t sandbox_exec(const xmex::Value* inst) {
     int64_t handle = get_handle(inst);
     SandboxConfig config;
     {
@@ -189,7 +189,7 @@ int64_t sandbox_exec(const lite::Value* inst) {
     }
 }
 
-void sandbox_destroy(const lite::Value* inst) {
+void sandbox_destroy(const xmex::Value* inst) {
     int64_t handle = get_handle(inst);
     std::lock_guard<std::mutex> lk(g_sandbox_mutex);
     g_sandbox_configs.erase(handle);
@@ -199,72 +199,72 @@ void sandbox_destroy(const lite::Value* inst) {
 
 // ============================================================================
 // sandbox 模块参数适配器(2026-10 增补)
-// 模块调用统一按 lite::Value* 传参,而底层函数签名是 (inst, 标量/char*, len) 混合形式,
-// 直接映射会把 lite::Value* 误当成 char* 内容解读(崩溃根因)。
-// 这里补一层适配器,从 lite::Value 中正确提取字符串与整数。
+// 模块调用统一按 xmex::Value* 传参,而底层函数签名是 (inst, 标量/char*, len) 混合形式,
+// 直接映射会把 xmex::Value* 误当成 char* 内容解读(崩溃根因)。
+// 这里补一层适配器,从 xmex::Value 中正确提取字符串与整数。
 // ============================================================================
-#include "pylite/runtime.h"
-#include "pylite/value.h"
+#include "xmex/runtime.h"
+#include "xmex/value.h"
 
-static const char* sb_str(const lite::Value* v) {
-    if (!v || v->tag != lite::kStr) return "";
+static const char* sb_str(const xmex::Value* v) {
+    if (!v || v->tag != xmex::kStr) return "";
     return str_data(v);
 }
-static int64_t sb_len(const lite::Value* v) {
-    if (!v || v->tag != lite::kStr) return 0;
+static int64_t sb_len(const xmex::Value* v) {
+    if (!v || v->tag != xmex::kStr) return 0;
     return str_size(v);
 }
-static int64_t sb_int(const lite::Value* v) {
-    if (!v || v->tag != lite::kInt) return 0;
+static int64_t sb_int(const xmex::Value* v) {
+    if (!v || v->tag != xmex::kInt) return 0;
     return v->as.i;
 }
 
 extern "C" {
-lite::Value sandbox_set_work_dir_v(const lite::Value* inst, const lite::Value* path) {
+xmex::Value sandbox_set_work_dir_v(const xmex::Value* inst, const xmex::Value* path) {
     sandbox_set_work_dir(inst, sb_str(path), sb_len(path));
     return none_();
 }
-lite::Value sandbox_set_binary_v(const lite::Value* inst, const lite::Value* path) {
+xmex::Value sandbox_set_binary_v(const xmex::Value* inst, const xmex::Value* path) {
     sandbox_set_binary(inst, sb_str(path), sb_len(path));
     return none_();
 }
-lite::Value sandbox_add_arg_v(const lite::Value* inst, const lite::Value* arg) {
+xmex::Value sandbox_add_arg_v(const xmex::Value* inst, const xmex::Value* arg) {
     sandbox_add_arg(inst, sb_str(arg), sb_len(arg));
     return none_();
 }
-lite::Value sandbox_set_stdin_v(const lite::Value* inst, const lite::Value* path) {
+xmex::Value sandbox_set_stdin_v(const xmex::Value* inst, const xmex::Value* path) {
     sandbox_set_stdin(inst, sb_str(path), sb_len(path));
     return none_();
 }
-lite::Value sandbox_set_stdout_v(const lite::Value* inst, const lite::Value* path) {
+xmex::Value sandbox_set_stdout_v(const xmex::Value* inst, const xmex::Value* path) {
     sandbox_set_stdout(inst, sb_str(path), sb_len(path));
     return none_();
 }
-lite::Value sandbox_set_stderr_v(const lite::Value* inst, const lite::Value* path) {
+xmex::Value sandbox_set_stderr_v(const xmex::Value* inst, const xmex::Value* path) {
     sandbox_set_stderr(inst, sb_str(path), sb_len(path));
     return none_();
 }
-lite::Value sandbox_set_cpu_limit_v(const lite::Value* inst, const lite::Value* ms) {
+xmex::Value sandbox_set_cpu_limit_v(const xmex::Value* inst, const xmex::Value* ms) {
     sandbox_set_cpu_limit(inst, static_cast<uint32_t>(sb_int(ms)));
     return none_();
 }
-lite::Value sandbox_set_mem_limit_v(const lite::Value* inst, const lite::Value* bytes) {
+xmex::Value sandbox_set_mem_limit_v(const xmex::Value* inst, const xmex::Value* bytes) {
     sandbox_set_mem_limit(inst, static_cast<uint64_t>(sb_int(bytes)));
     return none_();
 }
-lite::Value sandbox_set_max_pids_v(const lite::Value* inst, const lite::Value* n) {
+xmex::Value sandbox_set_max_pids_v(const xmex::Value* inst, const xmex::Value* n) {
     sandbox_set_max_pids(inst, sb_int(n));
     return none_();
 }
-lite::Value sandbox_set_no_seccomp_v(const lite::Value* inst, const lite::Value* flag) {
+xmex::Value sandbox_set_no_seccomp_v(const xmex::Value* inst, const xmex::Value* flag) {
     sandbox_set_no_seccomp(inst, sb_int(flag));
     return none_();
 }
-lite::Value sandbox_exec_v(const lite::Value* inst) {
+xmex::Value sandbox_exec_v(const xmex::Value* inst) {
     int64_t r = sandbox_exec(inst);
     return int_(r);
 }
-lite::Value sandbox_destroy_v(const lite::Value* inst) {
+xmex::Value sandbox_destroy_v(const xmex::Value* inst) {
     sandbox_destroy(inst);
     return none_();
 }

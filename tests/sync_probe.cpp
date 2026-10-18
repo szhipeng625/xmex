@@ -5,8 +5,8 @@
 //   2. 消费者先进入等待、生产者稍后放入数据并唤醒 —— 消费者必须被唤醒并读到数据
 //      (这条同时证明"检查条件与等待之间不丢唤醒"是成立的)
 //   3. 广播能一次唤醒多个等待者
-#include "pylite/runtime.h"
-#include "pylite/value.h"
+#include "xmex/runtime.h"
+#include "xmex/value.h"
 
 #include <cstdio>
 #include <cstring>
@@ -20,7 +20,7 @@ static void check(bool ok, const char *what) {
 }
 
 // ---- 场景一:单生产者、单消费者 ----
-static lite::Value m1, c1;
+static xmex::Value m1, c1;
 static int ready1 = 0;
 static int consumed1 = -1;
 
@@ -43,7 +43,7 @@ static void *producer1(void *) {
 }
 
 // ---- 场景二:两个消费者、广播唤醒 ----
-static lite::Value m2, c2;
+static xmex::Value m2, c2;
 static int ready2 = 0;
 static int got2 = 0;
 
@@ -67,16 +67,16 @@ static void *producer2(void *) {
 
 int main() {
   std::printf("=== 互斥锁 ===\n");
-  lite::Value m = sync_mutex_new();
-  check(m.tag == lite::kInt && m.as.i > 0, "创建锁返回有效句柄");
+  xmex::Value m = sync_mutex_new();
+  check(m.tag == xmex::kInt && m.as.i > 0, "创建锁返回有效句柄");
   sync_mutex_lock(&m);
   sync_mutex_unlock(&m);
   check(true, "加锁与解锁正常返回");
   sync_mutex_free(&m);
 
   std::printf("=== 条件变量 ===\n");
-  lite::Value cv = sync_cond_new();
-  check(cv.tag == lite::kInt && cv.as.i > 0, "创建条件变量返回有效句柄");
+  xmex::Value cv = sync_cond_new();
+  check(cv.tag == xmex::kInt && cv.as.i > 0, "创建条件变量返回有效句柄");
   sync_cond_free(&cv);
 
   std::printf("=== 生产/消费协作(单对单)===\n");
@@ -106,8 +106,8 @@ int main() {
   sync_cond_free(&c2);
 
   std::printf("=== 快照 ===\n");
-  lite::Value st = sync_stats();
-  check(st.tag == lite::kStr && std::strstr(str_data(&st), "mutexes") != nullptr,
+  xmex::Value st = sync_stats();
+  check(st.tag == xmex::kStr && std::strstr(str_data(&st), "mutexes") != nullptr,
         "同步原语快照可获取");
 
   std::printf("\n%s (失败 %d 项)\n", g_fail ? "FAILED" : "PASSED", g_fail);

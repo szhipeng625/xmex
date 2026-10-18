@@ -17,7 +17,7 @@
 
 using namespace llvm;
 
-namespace pylite {
+namespace xmex {
 
 namespace {
 
@@ -49,10 +49,10 @@ std::unique_ptr<TargetMachine> makeTargetMachine(const Triple &TT, std::string *
 // 跑一遍标准优化流水线。IRGen 里每个值都住在 alloca 里,
 // 不优化的话生成的代码会充满 load/store;这里把它们清理掉。
 //
-// 设 PYLITE_NO_OPT=1 可跳过。这是排查手段:行为在开/关优化之间不一致时,
+// 设 XMEX_NO_OPT=1 可跳过。这是排查手段:行为在开/关优化之间不一致时,
 // 说明问题出在 IR 本身(比如缺少别名信息、可疑的 align),而不是优化器算错。
 void runOptimizationPipeline(Module &M, TargetMachine &TM) {
-  if (std::getenv("PYLITE_NO_OPT") != nullptr) return;
+  if (std::getenv("XMEX_NO_OPT") != nullptr) return;
 
   LoopAnalysisManager LAM;
   FunctionAnalysisManager FAM;
@@ -138,4 +138,4 @@ bool emitIRText(Module &M, const std::string &outPath, std::string *error) {
   return true;
 }
 
-}  // namespace pylite
+}  // namespace xmex

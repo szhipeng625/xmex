@@ -1,8 +1,8 @@
 // plugin module: external C++ project plugin access
-// flow: project writes pylite_plugin.pys -> plugin.scan -> plugin.register
+// flow: project writes xmex_plugin.pys -> plugin.scan -> plugin.register
 //       (compile + bind as distributed node) -> plugin.call
-#include "pylite/runtime.h"
-#include "pylite/value.h"
+#include "xmex/runtime.h"
+#include "xmex/value.h"
 #include "kv_admin.h"
 #include <string>
 #include <vector>
@@ -39,13 +39,13 @@ static int run_cmd(const std::string& cmd, std::string* out) {
 
 extern "C" {
 
-static lite::Value jstr(const std::string& s) { return str_new(s.c_str(), s.size()); }
+static xmex::Value jstr(const std::string& s) { return str_new(s.c_str(), s.size()); }
 
-// plugin.scan(dir) —— 在指定目录下发现 pylite_plugin.pys 注册文件
-lite::Value plugin_scan(const lite::Value* dir) {
+// plugin.scan(dir) —— 在指定目录下发现 xmex_plugin.pys 注册文件
+xmex::Value plugin_scan(const xmex::Value* dir) {
     std::lock_guard<std::mutex> lk(g_mu);
-    std::string d = (dir && dir->tag == lite::kStr) ? std::string(str_data(dir), str_size(dir)) : ".";
-    std::string pys = d + "/pylite_plugin.pys";
+    std::string d = (dir && dir->tag == xmex::kStr) ? std::string(str_data(dir), str_size(dir)) : ".";
+    std::string pys = d + "/xmex_plugin.pys";
     std::ifstream ifs(pys);
     bool found = ifs.good();
     std::ostringstream oss;
@@ -76,10 +76,10 @@ static std::string pick(const std::string& text, const std::string& key) {
 }
 
 // plugin.register(dir, addr) —— 读取注册文件,编译项目,绑定为分布式节点
-lite::Value plugin_register(const lite::Value* dir, const lite::Value* addr) {
-    std::string d = (dir && dir->tag == lite::kStr) ? std::string(str_data(dir), str_size(dir)) : ".";
-    std::string a = (addr && addr->tag == lite::kStr) ? std::string(str_data(addr), str_size(addr)) : "127.0.0.1:19100";
-    std::string pys = d + "/pylite_plugin.pys";
+xmex::Value plugin_register(const xmex::Value* dir, const xmex::Value* addr) {
+    std::string d = (dir && dir->tag == xmex::kStr) ? std::string(str_data(dir), str_size(dir)) : ".";
+    std::string a = (addr && addr->tag == xmex::kStr) ? std::string(str_data(addr), str_size(addr)) : "127.0.0.1:19100";
+    std::string pys = d + "/xmex_plugin.pys";
     std::string text((std::istreambuf_iterator<char>(*(new std::ifstream(pys)))),
                      std::istreambuf_iterator<char>());
     std::string build = pick(text, "build");
@@ -130,10 +130,10 @@ lite::Value plugin_register(const lite::Value* dir, const lite::Value* addr) {
 // plugin.call(dir, fn_name, args_json) —— 调用已绑定插件项目的接口
 // 通过节点对应的项目二进制,以命令行方式执行: <binary> <fn_name> <args_json>
 // 项目侧约定: argv[1] 为函数名, argv[2] 为 JSON 参数串, 结果输出到 stdout
-lite::Value plugin_call(const lite::Value* dir, const lite::Value* fn, const lite::Value* args) {
-    std::string d = (dir && dir->tag == lite::kStr) ? std::string(str_data(dir), str_size(dir)) : ".";
-    std::string f = (fn && fn->tag == lite::kStr) ? std::string(str_data(fn), str_size(fn)) : "";
-    std::string a = (args && args->tag == lite::kStr) ? std::string(str_data(args), str_size(args)) : "{}";
+xmex::Value plugin_call(const xmex::Value* dir, const xmex::Value* fn, const xmex::Value* args) {
+    std::string d = (dir && dir->tag == xmex::kStr) ? std::string(str_data(dir), str_size(dir)) : ".";
+    std::string f = (fn && fn->tag == xmex::kStr) ? std::string(str_data(fn), str_size(fn)) : "";
+    std::string a = (args && args->tag == xmex::kStr) ? std::string(str_data(args), str_size(args)) : "{}";
     std::string binary;
     {
         std::lock_guard<std::mutex> lk(g_mu);
@@ -160,7 +160,7 @@ lite::Value plugin_call(const lite::Value* dir, const lite::Value* fn, const lit
 }
 
 // plugin.list() —— 列出全部已发现/注册的插件
-lite::Value plugin_list() {
+xmex::Value plugin_list() {
     std::lock_guard<std::mutex> lk(g_mu);
     std::ostringstream oss;
     oss << "[";

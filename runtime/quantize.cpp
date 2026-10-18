@@ -9,7 +9,7 @@
 //   - 零外部依赖：纯 C++ 实现量化算法
 //   - AWQ 格式兼容：与 HuggingFace AWQ 格式一致
 //   - 架构模板：预置主流 LLM 架构的完整配置
-#include "pylite/runtime.h"
+#include "xmex/runtime.h"
 
 #include <cstdio>
 #include <cstring>
@@ -105,15 +105,15 @@ float dequantizeValue(const uint32_t *int4Weights, const float *scales,
 //   例如: [{"name":"q_proj","rows":5120,"cols":5120}, ...]
 //
 // 返回量化后的配置和预估大小。
-extern "C" lite::Value quantize_fp16_to_awq(const lite::Value *weightsJson,
-                                             const lite::Value *bits,
-                                             const lite::Value *groupSize) {
-  if (weightsJson->tag != lite::kStr) {
+extern "C" xmex::Value quantize_fp16_to_awq(const xmex::Value *weightsJson,
+                                             const xmex::Value *bits,
+                                             const xmex::Value *groupSize) {
+  if (weightsJson->tag != xmex::kStr) {
     runtime_error("quantize_fp16_to_awq() 需要字符串参数: weights_json");
   }
 
-  int b = (bits->tag == lite::kInt) ? static_cast<int>(as_int(*bits)) : 4;
-  int gs = (groupSize->tag == lite::kInt) ? static_cast<int>(as_int(*groupSize)) : 128;
+  int b = (bits->tag == xmex::kInt) ? static_cast<int>(as_int(*bits)) : 4;
+  int gs = (groupSize->tag == xmex::kInt) ? static_cast<int>(as_int(*groupSize)) : 128;
 
   const char *wj = str_data(weightsJson);
 
@@ -183,8 +183,8 @@ extern "C" lite::Value quantize_fp16_to_awq(const lite::Value *weightsJson,
 // 返回指定架构的完整配置模板。
 //
 // 支持的架构: qwen2, llama3, mistral, deepseek
-extern "C" lite::Value quantize_arch_template(const lite::Value *archName) {
-  if (archName->tag != lite::kStr) {
+extern "C" xmex::Value quantize_arch_template(const xmex::Value *archName) {
+  if (archName->tag != xmex::kStr) {
     runtime_error("quantize_arch_template() 需要一个字符串参数: arch_name");
   }
 
@@ -307,9 +307,9 @@ extern "C" lite::Value quantize_arch_template(const lite::Value *archName) {
 
 // quantize_verify_precision(fp16_values: str, awq_values: str) -> str
 // 验证量化精度，计算 MSE 和最大误差。
-extern "C" lite::Value quantize_verify_precision(const lite::Value *fp16Values,
-                                                 const lite::Value *awqValues) {
-  if (fp16Values->tag != lite::kStr || awqValues->tag != lite::kStr) {
+extern "C" xmex::Value quantize_verify_precision(const xmex::Value *fp16Values,
+                                                 const xmex::Value *awqValues) {
+  if (fp16Values->tag != xmex::kStr || awqValues->tag != xmex::kStr) {
     runtime_error("quantize_verify_precision() 需要两个字符串参数");
   }
 
@@ -334,8 +334,8 @@ extern "C" lite::Value quantize_verify_precision(const lite::Value *fp16Values,
 
 // quantize_model_info(model_path: str) -> str
 // 分析已有模型的量化信息。
-extern "C" lite::Value quantize_model_info(const lite::Value *modelPath) {
-  if (modelPath->tag != lite::kStr) {
+extern "C" xmex::Value quantize_model_info(const xmex::Value *modelPath) {
+  if (modelPath->tag != xmex::kStr) {
     runtime_error("quantize_model_info() 需要一个字符串参数: model_path");
   }
 

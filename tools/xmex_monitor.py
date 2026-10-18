@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# PyLite 性能监控数据采集脚本
+# Xmex 性能监控数据采集脚本
 # 每分钟从推理引擎采集性能数据，生成 JSON 文件供 Web 页面展示
 
 import json
@@ -10,7 +10,7 @@ import datetime
 import random
 
 # 数据输出路径（Web 服务器目录）
-OUTPUT_DIR = "/tmp/pylite_metrics"
+OUTPUT_DIR = "/tmp/xmex_metrics"
 METRICS_FILE = os.path.join(OUTPUT_DIR, "metrics.json")
 
 # 创建输出目录
@@ -66,8 +66,8 @@ def collect_metrics():
     
     # 引擎状态
     metrics["engine_status"] = "running"
-    metrics["pylite_enabled"] = True
-    metrics["pylite_version"] = "1.0.0"
+    metrics["xmex_enabled"] = True
+    metrics["xmex_version"] = "1.0.0"
     metrics["model_name"] = "DeepSeek-R1-14B-AWQ"
     metrics["architecture"] = "Qwen2ForCausalLM"
     metrics["gpu_name"] = "NVIDIA GeForce RTX 4090"
@@ -146,12 +146,12 @@ def save_metrics(metrics, history):
 def sync_to_web():
     """将数据同步到 Web 服务器目录（通过 scp 或 rsync）"""
     # 尝试通过 scp 同步到 alytun Web 目录
-    web_target = "root@47.253.41.10:/usr/share/nginx/html/pylite/data/"
+    web_target = "root@47.253.41.10:/usr/share/nginx/html/xmex/data/"
     
     # 创建目标目录
     subprocess.run([
         "ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5",
-        "root@47.253.41.10", "mkdir -p /usr/share/nginx/html/pylite/data"
+        "root@47.253.41.10", "mkdir -p /usr/share/nginx/html/xmex/data"
     ], capture_output=True, timeout=10)
     
     # 同步文件
@@ -164,7 +164,7 @@ def sync_to_web():
             ], capture_output=True, timeout=10)
 
 def main():
-    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] PyLite 监控采集启动")
+    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Xmex 监控采集启动")
     print(f"  输出目录: {OUTPUT_DIR}")
     print(f"  采集间隔: 60 秒")
     

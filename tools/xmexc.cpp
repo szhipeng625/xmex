@@ -1,9 +1,9 @@
-// pylitec —— PyLite 的 AOT 编译器。
+// xmexc —— Xmex 的 AOT 编译器。
 //
-//   pylitec <输入.pys> -o <输出.o> [--emit-ir <输出.ll>]
+//   xmexc <输入.pys> -o <输出.o> [--emit-ir <输出.ll>]
 //
 // 产出的是普通 COFF 目标文件,可以直接和 C++ 编译出的目标文件一起链接。
-// 生成的符号是 pylite_<模块名>_<函数名>,以及顶层的 pylite_<模块名>_main。
+// 生成的符号是 xmex_<模块名>_<函数名>,以及顶层的 xmex_<模块名>_main。
 #include "aot/compiler.h"
 #include "frontend/lexer.h"
 #include "frontend/parser.h"
@@ -26,7 +26,7 @@ namespace {
 
 void usage() {
   std::fprintf(stderr,
-               "用法: pylitec <输入.pys> -o <输出.o> [-I 名称] [--emit-ir <输出.ll>]\n"
+               "用法: xmexc <输入.pys> -o <输出.o> [-I 名称] [--emit-ir <输出.ll>]\n"
                "\n"
                "  -I <名称>        指定模块名(默认取输入文件的主文件名)\n"
                "  --emit-ir <路径> 同时把 LLVM IR 文本写出来,便于检查代码生成\n"
@@ -97,14 +97,14 @@ int main(int argc, char **argv) {
 
   try {
     // --- 前端 ---
-    pylite::Lexer lexer(buf.str(), input);
-    pylite::Parser parser(lexer.tokenize(), input);
+    xmex::Lexer lexer(buf.str(), input);
+    xmex::Parser parser(lexer.tokenize(), input);
     auto ast = parser.parseModule();
 
     // --- IRGen ---
     llvm::LLVMContext ctx;
     auto module = std::make_unique<llvm::Module>(moduleName, ctx);
-    pylite::IRGen gen(*module, moduleName);
+    xmex::IRGen gen(*module, moduleName);
     gen.setTrace(trace);
     if (trace) {
       // 运行时只负责 fopen(\"w\"),目录要由驱动侧先建好;建失败也不致命,
@@ -114,9 +114,9 @@ int main(int argc, char **argv) {
       // cmd 的 mkdir 不认 -p,会在当前目录建一个名为 "-p" 的垃圾目录。
       // create_directories 的路径解析与运行期 fopen 一致。
       std::error_code ec;
-      std::filesystem::create_directories("/tmp/pylite_trace", ec);
+      std::filesystem::create_directories("/tmp/xmex_trace", ec);
       if (ec) {
-        std::fprintf(stderr, "警告: 无法创建 /tmp/pylite_trace,事件落盘不可用\n");
+        std::fprintf(stderr, "警告: 无法创建 /tmp/xmex_trace,事件落盘不可用\n");
       }
     }
     gen.generate(*ast);
@@ -132,7 +132,7 @@ int main(int argc, char **argv) {
 
     if (!emitIRPath.empty()) {
       std::string err;
-      if (!pylite::emitIRText(*module, emitIRPath, &err)) {
+      if (!xmex::emitIRText(*module, emitIRPath, &err)) {
         std::fprintf(stderr, "错误: %s\n", err.c_str());
         return 1;
       }
@@ -140,14 +140,14 @@ int main(int argc, char **argv) {
     }
 
     std::string err;
-    if (!pylite::emitObjectFile(*module, output, &err)) {
+    if (!xmex::emitObjectFile(*module, output, &err)) {
       std::fprintf(stderr, "错误: %s\n", err.c_str());
       return 1;
     }
     std::fprintf(stderr, "已生成目标文件: %s\n", output.c_str());
     return 0;
 
-  } catch (const pylite::SourceError &e) {
+  } catch (const xmex::SourceError &e) {
     std::fprintf(stderr, "%s\n", e.what());
     return 1;
   }

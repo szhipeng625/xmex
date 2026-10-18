@@ -5,7 +5,7 @@
 
 #include <string>
 
-namespace pylite {
+namespace xmex {
 
 // 本项目的目标平台。显式钉死,不靠 LLVM 自动推断 ——
 // AOT 与 JIT 两条路必须用同一个 triple/DataLayout,否则 {i32,i64} 的
@@ -32,4 +32,4 @@ bool emitIRText(llvm::Module &M, const std::string &outPath,
 // 调用一次即可,进程内幂等。生成代码前必须调用。
 void initializeCodeGenTargets();
 
-}  // namespace pylite
+}  // namespace xmex

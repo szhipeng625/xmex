@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# PyLite 的 Windows(UCRT64)构建脚本。
+# Xmex 的 Windows(UCRT64)构建脚本。
 #
 #   bash build-windows.sh [构建目录]      # 默认 build-win
 #
@@ -20,7 +20,7 @@ cd "$REPO_ROOT"
 # 命中的是 MSVCRT 版的 libgcc_s_seh-1.dll / libwinpthread-1.dll ——
 # ABI 不兼容,cc1plus 静默崩溃:任何编译都 exit 1 且没有任何输出。
 #
-# 不只毒编译:构建期 cmake 要运行 pylitec.exe,测试期要加载 libLLVM-22.dll,
+# 不只毒编译:构建期 cmake 要运行 xmexc.exe,测试期要加载 libLLVM-22.dll,
 # 全走同一份 PATH,所以整条流水线都必须在修好的 PATH 里。
 export PATH=$(echo "$PATH" | tr ':' '\n' | grep -v -E '^/(d/)?mingw64/bin$' | paste -sd:)
 export PATH="/d/msys64/ucrt64/bin:$PATH"
@@ -30,7 +30,7 @@ export PATH="/d/msys64/ucrt64/bin:$PATH"
 # ---------------------------------------------------------------------------
 # "g++ --version 能打印" 不代表能编译 —— 崩溃发生在 cc1plus 启动时,
 # 而 --version 不经过 cc1plus。必须实编一次。
-PATHCHECK="${TMPDIR:-/tmp}/pylite_pathcheck.exe"
+PATHCHECK="${TMPDIR:-/tmp}/xmex_pathcheck.exe"
 printf 'int main(){return 0;}\n' | g++ -x c++ - -o "$PATHCHECK"
 "$PATHCHECK"
 echo "[ok] PATH 修复生效: $(which g++) / $(g++ --version | head -1)"
@@ -54,7 +54,7 @@ cmake -G Ninja -S "$REPO_ROOT" -B "$BUILD_DIR" \
 #   链接通过但 jit_spike 段错误            → abi.cpp 的 sret 边界不对
 echo "--- 关键目标 ---"
 cmake --build "$BUILD_DIR" --target \
-      pylitec jit_spike abi_test runtime_test gc_test frontend_test
+      xmexc jit_spike abi_test runtime_test gc_test frontend_test
 
 # ---------------------------------------------------------------------------
 # 5) 全量构建 + 测试
@@ -64,7 +64,7 @@ cmake --build "$BUILD_DIR"
 
 # 出目标文件先冒烟:必须是 COFF,出现 ELF 说明 kTargetTriple 没改对。
 echo "--- COFF 冒烟 ---"
-./"$BUILD_DIR"/bin/pylitec.exe tests/e2e/arith_ops.pys -o "$BUILD_DIR/arith_ops.o"
+./"$BUILD_DIR"/bin/xmexc.exe tests/e2e/arith_ops.pys -o "$BUILD_DIR/arith_ops.o"
 file "$BUILD_DIR/arith_ops.o"
 
 echo "--- 测试 ---"

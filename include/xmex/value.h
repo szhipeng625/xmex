@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <cstddef>
 
-namespace lite {
+namespace xmex {
 
 enum Tag : int32_t {
   kNull     = 0,
@@ -39,45 +39,45 @@ struct Value {
 static_assert(sizeof(Value) == 16, "Value layout is part of the ABI");
 static_assert(alignof(Value) == 8, "Value layout is part of the ABI");
 
-}  // namespace lite
+}  // namespace xmex
 
 // 构造函数与取值辅助放在全局作用域，调用处不必写命名空间限定。
-inline lite::Value none_() {
-  lite::Value r;
-  r.tag = lite::kNull;
+inline xmex::Value none_() {
+  xmex::Value r;
+  r.tag = xmex::kNull;
   r.as.i = 0;
   return r;
 }
 
-inline lite::Value int_(int64_t v) {
-  lite::Value r;
-  r.tag = lite::kInt;
+inline xmex::Value int_(int64_t v) {
+  xmex::Value r;
+  r.tag = xmex::kInt;
   r.as.i = v;
   return r;
 }
 
-inline lite::Value float_(double v) {
-  lite::Value r;
-  r.tag = lite::kFloat;
+inline xmex::Value float_(double v) {
+  xmex::Value r;
+  r.tag = xmex::kFloat;
   r.as.f = v;
   return r;
 }
 
-inline lite::Value bool_(bool v) {
-  lite::Value r;
-  r.tag = lite::kBool;
+inline xmex::Value bool_(bool v) {
+  xmex::Value r;
+  r.tag = xmex::kBool;
   r.as.i = v ? 1 : 0;
   return r;
 }
 
-inline lite::Value ptr(int32_t tag, void *p) {
-  lite::Value r;
+inline xmex::Value ptr(int32_t tag, void *p) {
+  xmex::Value r;
   r.tag = tag;
   r.as.ptr = p;
   return r;
 }
 
-inline int64_t as_int(lite::Value v)   { return v.as.i; }
-inline double  as_float(lite::Value v) { return v.as.f; }
-inline bool    as_bool(lite::Value v)  { return v.as.i != 0; }
-inline void   *as_ptr(lite::Value v)   { return v.as.ptr; }
+inline int64_t as_int(xmex::Value v)   { return v.as.i; }
+inline double  as_float(xmex::Value v) { return v.as.f; }
+inline bool    as_bool(xmex::Value v)  { return v.as.i != 0; }
+inline void   *as_ptr(xmex::Value v)   { return v.as.ptr; }

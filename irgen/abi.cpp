@@ -1,6 +1,6 @@
 #include "abi.h"
 
-#include "pylite/value.h"  // lite::kInt 等 tag 常量,保证与 C++ 侧同源
+#include "xmex/value.h"  // xmex::kInt 等 tag 常量,保证与 C++ 侧同源
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Constants.h"
@@ -11,7 +11,7 @@
 
 using namespace llvm;
 
-namespace pylite {
+namespace xmex {
 
 Abi::Abi(Module &M) : M_(M), Ctx_(M.getContext()) {
   i32Ty_ = Type::getInt32Ty(Ctx_);
@@ -21,10 +21,10 @@ Abi::Abi(Module &M) : M_(M), Ctx_(M.getContext()) {
   voidTy_ = Type::getVoidTy(Ctx_);
 
   // 同一个 context 里可能建多个 Module(REPL 每次输入一个),
-  // 所以先按名字查已有类型,避免反复 create 出 lite::Value.1 / lite::Value.2。
-  valueTy_ = StructType::getTypeByName(Ctx_, "lite::Value");
+  // 所以先按名字查已有类型,避免反复 create 出 xmex::Value.1 / xmex::Value.2。
+  valueTy_ = StructType::getTypeByName(Ctx_, "xmex::Value");
   if (!valueTy_) {
-    valueTy_ = StructType::create(Ctx_, {i32Ty_, i64Ty_}, "lite::Value");
+    valueTy_ = StructType::create(Ctx_, {i32Ty_, i64Ty_}, "xmex::Value");
   }
 
   sretAttr_ = Attribute::getWithStructRetType(Ctx_, valueTy_);
@@ -71,7 +71,7 @@ Value *Abi::packAggregate(IRBuilder<> &B, Value *tag, Value *payloadI64) {
 }
 
 void Abi::storeInt(IRBuilder<> &B, Value *slot, int64_t v) {
-  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, lite::kInt),
+  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, xmex::kInt),
                               ConstantInt::get(i64Ty_, v)),
                 slot);
 }
@@ -80,25 +80,25 @@ void Abi::storeFloat(IRBuilder<> &B, Value *slot, double v) {
   // payload 字段在 LLVM 侧是 i64,所以要按位重新解释 double
   uint64_t bits;
   memcpy(&bits, &v, sizeof(bits));
-  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, lite::kFloat),
+  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, xmex::kFloat),
                               ConstantInt::get(i64Ty_, bits)),
                 slot);
 }
 
 void Abi::storeBool(IRBuilder<> &B, Value *slot, bool v) {
-  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, lite::kBool),
+  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, xmex::kBool),
                               ConstantInt::get(i64Ty_, v ? 1 : 0)),
                 slot);
 }
 
 void Abi::storeNone(IRBuilder<> &B, Value *slot) {
-  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, lite::kNull),
+  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, xmex::kNull),
                               ConstantInt::get(i64Ty_, 0)),
                 slot);
 }
 
 void Abi::storeI64AsInt(IRBuilder<> &B, Value *slot, Value *i64v) {
-  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, lite::kInt), i64v), slot);
+  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, xmex::kInt), i64v), slot);
 }
 
 void Abi::copySlot(IRBuilder<> &B, Value *dst, Value *src) {
@@ -124,9 +124,9 @@ Value *Abi::loadFloat(IRBuilder<> &B, Value *slot) {
 // 这些 declare* 是"聚合体如何跨 ABI 边界"这条约定的唯一落地点,按平台分两种:
 //
 //   Win64 :聚合体(>8 字节)一律按引用传递,返回值走隐藏的 sret 指针。
-//          → void @name(ptr sret(%lite::Value), ptr %a, ptr %b)
+//          → void @name(ptr sret(%xmex::Value), ptr %a, ptr %b)
 //   SysV  :聚合体按值拆分到寄存器,返回值用 RAX:RDX。
-//          → %lite::Value @name(%lite::Value %a, %lite::Value %b)
+//          → %xmex::Value @name(%xmex::Value %a, %xmex::Value %b)
 //
 // 两侧都必须与 g++ 编译 runtime/*.cpp 时的实际降低一致。写错的表现是
 // "链接通过、lookup 成功、一执行就段错误",且几乎无法从崩溃点反推回来
@@ -160,12 +160,12 @@ Function *Abi::getOrDeclare(StringRef name, FunctionType *ft, bool hasSret) {
 
 Function *Abi::declareBinRet(StringRef name) {
 #ifdef _WIN32
-  // void @name(ptr sret(%lite::Value), ptr %a, ptr %b)
+  // void @name(ptr sret(%xmex::Value), ptr %a, ptr %b)
   return getOrDeclare(name,
                       FunctionType::get(voidTy_, {ptrTy_, ptrTy_, ptrTy_}, false),
                       /*hasSret=*/true);
 #else
-  // Linux System V ABI: %lite::Value @name(%lite::Value %a, %lite::Value %b)
+  // Linux System V ABI: %xmex::Value @name(%xmex::Value %a, %xmex::Value %b)
   // LLVM 自动将 {i32,i64} 拆分为寄存器对 (rdi,rsi) 和 (rdx,rcx)
   return getOrDeclare(name,
                       FunctionType::get(valueTy_, {valueTy_, valueTy_}, false),
@@ -175,11 +175,11 @@ Function *Abi::declareBinRet(StringRef name) {
 
 Function *Abi::declareUnaryRet(StringRef name) {
 #ifdef _WIN32
-  // void @name(ptr sret(%lite::Value), ptr %a)
+  // void @name(ptr sret(%xmex::Value), ptr %a)
   return getOrDeclare(name, FunctionType::get(voidTy_, {ptrTy_, ptrTy_}, false),
                       /*hasSret=*/true);
 #else
-  // Linux: %lite::Value @name(%lite::Value %a)
+  // Linux: %xmex::Value @name(%xmex::Value %a)
   return getOrDeclare(name, FunctionType::get(valueTy_, {valueTy_}, false),
                       /*hasSret=*/false);
 #endif
@@ -191,7 +191,7 @@ Function *Abi::declareUnaryPred(StringRef name) {
   return getOrDeclare(name, FunctionType::get(i32Ty_, {ptrTy_}, false),
                       /*hasSret=*/false);
 #else
-  // i32 @name(%lite::Value %a)  —— 谓词返回 i32 而非 i1,见 value.h
+  // i32 @name(%xmex::Value %a)  —— 谓词返回 i32 而非 i1,见 value.h
   return getOrDeclare(name, FunctionType::get(i32Ty_, {valueTy_}, false),
                       /*hasSret=*/false);
 #endif
@@ -201,12 +201,12 @@ Function *Abi::declareUnaryI64(StringRef name) {
 #ifdef _WIN32
   // i64 @name(ptr %a)
   //
-  // Win64 上按值聚合体一律降级成指针,于是 len(const lite::Value*) 与
-  // to_int(lite::Value) 的实参在机器层是同一个东西 —— 统一按指针声明即可。
+  // Win64 上按值聚合体一律降级成指针,于是 len(const xmex::Value*) 与
+  // to_int(xmex::Value) 的实参在机器层是同一个东西 —— 统一按指针声明即可。
   return getOrDeclare(name, FunctionType::get(i64Ty_, {ptrTy_}, false),
                       /*hasSret=*/false);
 #else
-  // len 接收指针参数，to_int 按值接收 lite::Value
+  // len 接收指针参数，to_int 按值接收 xmex::Value
   if (name == "len") {
     return getOrDeclare(name, FunctionType::get(i64Ty_, {ptrTy_}, false),
                         /*hasSret=*/false);
@@ -218,11 +218,11 @@ Function *Abi::declareUnaryI64(StringRef name) {
 
 Function *Abi::declareNullaryRet(StringRef name) {
 #ifdef _WIN32
-  // void @name(ptr sret(%lite::Value))
+  // void @name(ptr sret(%xmex::Value))
   return getOrDeclare(name, FunctionType::get(voidTy_, {ptrTy_}, false),
                       /*hasSret=*/true);
 #else
-  // Linux: %lite::Value @name()
+  // Linux: %xmex::Value @name()
   return getOrDeclare(name, FunctionType::get(valueTy_, {}, false),
                       /*hasSret=*/false);
 #endif
@@ -230,12 +230,12 @@ Function *Abi::declareNullaryRet(StringRef name) {
 
 Function *Abi::declarePtrI64Ret(StringRef name) {
 #ifdef _WIN32
-  // void @name(ptr sret(%lite::Value), ptr, i64)
+  // void @name(ptr sret(%xmex::Value), ptr, i64)
   return getOrDeclare(name,
                       FunctionType::get(voidTy_, {ptrTy_, ptrTy_, i64Ty_}, false),
                       /*hasSret=*/true);
 #else
-  // Linux: %lite::Value @name(ptr, i64)  —— ptr/i64 参数不受聚合体规则影响
+  // Linux: %xmex::Value @name(ptr, i64)  —— ptr/i64 参数不受聚合体规则影响
   return getOrDeclare(name,
                       FunctionType::get(valueTy_, {ptrTy_, i64Ty_}, false),
                       /*hasSret=*/false);
@@ -251,7 +251,7 @@ Value *Abi::callBinary(IRBuilder<> &B, StringRef fn, Value *a, Value *b) {
   call->addParamAttr(0, sretAttr_);
   return ret;
 #else
-  // 从栈槽 load 出 lite::Value 值，按值传递给运行时函数
+  // 从栈槽 load 出 xmex::Value 值，按值传递给运行时函数
   Value *va = B.CreateLoad(valueTy_, a);
   Value *vb = B.CreateLoad(valueTy_, b);
   Value *val = B.CreateCall(f, {va, vb}, (Twine(fn) + ".r").str());
@@ -381,7 +381,7 @@ Value *Abi::callUnaryI64(IRBuilder<> &B, StringRef fn, Value *a) {
   // Win64 下 len 与 to_int 的实参都是指针(按值聚合体降级成指针)
   return B.CreateCall(f, {a}, (Twine(fn) + ".r").str());
 #else
-  // to_int 按值接收 lite::Value，len 按指针接收
+  // to_int 按值接收 xmex::Value，len 按指针接收
   // 通过函数名区分：len 传指针，其余传值
   if (fn == "len") {
     return B.CreateCall(f, {a}, (Twine(fn) + ".r").str());
@@ -403,4 +403,4 @@ void Abi::emitRuntimeError(IRBuilder<> &B, const Twine &msg) {
   B.CreateUnreachable();
 }
 
-}  // namespace pylite
+}  // namespace xmex

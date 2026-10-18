@@ -10,7 +10,7 @@
 //
 // 三个 tag 各有一张表,用 string_view 比名字。方法集合刻意只取常用子集,
 // 文档里列了清单;表里没有的一律给出"XX 没有方法 'yy'"的明确报错。
-#include "pylite/runtime.h"
+#include "xmex/runtime.h"
 #include <map>
 #include <mutex>
 #include <string>
@@ -29,7 +29,7 @@ bool isSpace(unsigned char c) {
   return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
 }
 
-[[noreturn]] void noSuchMethod(const lite::Value *obj, std::string_view name) {
+[[noreturn]] void noSuchMethod(const xmex::Value *obj, std::string_view name) {
   static thread_local char buf[192];
   std::snprintf(buf, sizeof(buf), "'%s' 没有方法 '%.*s'", tag_name(obj->tag),
                 static_cast<int>(name.size()), name.data());
@@ -54,8 +54,8 @@ void needArgs(std::string_view method, int64_t got, int64_t min, int64_t max) {
   runtime_error(buf);
 }
 
-void needStrArg(std::string_view method, const lite::Value &v, const char *what) {
-  if (v.tag == lite::kStr) return;
+void needStrArg(std::string_view method, const xmex::Value &v, const char *what) {
+  if (v.tag == xmex::kStr) return;
   static thread_local char buf[192];
   std::snprintf(buf, sizeof(buf), "'%.*s' 的%s必须是字符串,实际得到 '%s'",
                 static_cast<int>(method.size()), method.data(), what,
@@ -63,8 +63,8 @@ void needStrArg(std::string_view method, const lite::Value &v, const char *what)
   runtime_error(buf);
 }
 
-void needListArg(std::string_view method, const lite::Value &v, const char *what) {
-  if (v.tag == lite::kList) return;
+void needListArg(std::string_view method, const xmex::Value &v, const char *what) {
+  if (v.tag == xmex::kList) return;
   static thread_local char buf[192];
   std::snprintf(buf, sizeof(buf), "'%.*s' 的%s必须是列表,实际得到 '%s'",
                 static_cast<int>(method.size()), method.data(), what,
@@ -72,8 +72,8 @@ void needListArg(std::string_view method, const lite::Value &v, const char *what
   runtime_error(buf);
 }
 
-void needDictArg(std::string_view method, const lite::Value &v) {
-  if (v.tag == lite::kDict) return;
+void needDictArg(std::string_view method, const xmex::Value &v) {
+  if (v.tag == xmex::kDict) return;
   static thread_local char buf[192];
   std::snprintf(buf, sizeof(buf), "'%.*s' 的参数必须是字典,实际得到 '%s'",
                 static_cast<int>(method.size()), method.data(),
@@ -85,7 +85,7 @@ void needDictArg(std::string_view method, const lite::Value &v) {
 // 字符串方法
 // ---------------------------------------------------------------------------
 
-lite::Value strUpper(const lite::Value &s) {
+xmex::Value strUpper(const xmex::Value &s) {
   const int64_t n = str_size(&s);
   const char *data = str_data(&s);
   // ⚠️ 显式根:buf 要在随后的 str_new 分配期间活下来
@@ -93,19 +93,19 @@ lite::Value strUpper(const lite::Value &s) {
   char *buf = nullptr;
   gc_root_push(reinterpret_cast<void **>(&buf));
   buf = static_cast<char *>(
-      gc_alloc(static_cast<size_t>(n) + 1, lite::kScanNone));
+      gc_alloc(static_cast<size_t>(n) + 1, xmex::kScanNone));
   for (int64_t i = 0; i < n; ++i) {
     const char c = data[i];
     buf[i] = (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
   }
   // 先把结果串造出来(这一步可能触发回收,buf 仍被根保护),再退根。
   // 反过来先退根的话,根就白加了。
-  lite::Value out = str_new(buf, n);
+  xmex::Value out = str_new(buf, n);
   gc_root_pop(1);
   return out;
 }
 
-lite::Value strLower(const lite::Value &s) {
+xmex::Value strLower(const xmex::Value &s) {
   const int64_t n = str_size(&s);
   const char *data = str_data(&s);
   // ⚠️ 显式根:buf 要在随后的 str_new 分配期间活下来
@@ -113,20 +113,20 @@ lite::Value strLower(const lite::Value &s) {
   char *buf = nullptr;
   gc_root_push(reinterpret_cast<void **>(&buf));
   buf = static_cast<char *>(
-      gc_alloc(static_cast<size_t>(n) + 1, lite::kScanNone));
+      gc_alloc(static_cast<size_t>(n) + 1, xmex::kScanNone));
   for (int64_t i = 0; i < n; ++i) {
     const char c = data[i];
     buf[i] = (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
   }
   // 先把结果串造出来(这一步可能触发回收,buf 仍被根保护),再退根。
   // 反过来先退根的话,根就白加了。
-  lite::Value out = str_new(buf, n);
+  xmex::Value out = str_new(buf, n);
   gc_root_pop(1);
   return out;
 }
 
 // strip() 去空白,strip(chars) 去掉两端出现在 chars 里的任意字符
-lite::Value strStrip(const lite::Value &s, const lite::Value *chars) {
+xmex::Value strStrip(const xmex::Value &s, const xmex::Value *chars) {
   const int64_t n = str_size(&s);
   const char *data = str_data(&s);
 
@@ -153,11 +153,11 @@ lite::Value strStrip(const lite::Value &s, const lite::Value *chars) {
 
 // 在 sep 的每次出现处切开。sep 为空串是 Python 里的 ValueError,这里直接报错;
 // 空串作为分隔符在我们这套 C 实现的循环里会死循环,不拦下来很危险。
-lite::Value strSplit(const lite::Value &s, const lite::Value *sep) {
+xmex::Value strSplit(const xmex::Value &s, const xmex::Value *sep) {
   const char *data = str_data(&s);
   const int64_t n = str_size(&s);
 
-  lite::Value out = list_new(nullptr, 0);
+  xmex::Value out = list_new(nullptr, 0);
 
   if (!sep) {
     // 不给分隔符:按空白切,并丢掉空片段(与 Python 一致)
@@ -167,7 +167,7 @@ lite::Value strSplit(const lite::Value &s, const lite::Value *sep) {
       if (i >= n) break;
       const int64_t start = i;
       while (i < n && !isSpace(static_cast<unsigned char>(data[i]))) ++i;
-      lite::Value piece = str_new(data + start, i - start);
+      xmex::Value piece = str_new(data + start, i - start);
       list_append(&out, &piece);
     }
     return out;
@@ -180,7 +180,7 @@ lite::Value strSplit(const lite::Value &s, const lite::Value *sep) {
   int64_t start = 0;
   for (int64_t i = 0; i + sn <= n;) {
     if (std::memcmp(data + i, sd, static_cast<size_t>(sn)) == 0) {
-      lite::Value piece = str_new(data + start, i - start);
+      xmex::Value piece = str_new(data + start, i - start);
       list_append(&out, &piece);
       i += sn;
       start = i;
@@ -188,19 +188,19 @@ lite::Value strSplit(const lite::Value &s, const lite::Value *sep) {
       ++i;
     }
   }
-  lite::Value tail = str_new(data + start, n - start);
+  xmex::Value tail = str_new(data + start, n - start);
   list_append(&out, &tail);
   return out;
 }
 
-lite::Value strJoin(const lite::Value &sep, const lite::Value &items) {
+xmex::Value strJoin(const xmex::Value &sep, const xmex::Value &items) {
   needListArg("join", items, "参数");
   const int64_t n = list_len(&items);
 
   // 先量一遍总长,一次分配,避免逐个 concat 造成 O(n²) 的拷贝
   int64_t total = 0;
   for (int64_t i = 0; i < n; ++i) {
-    lite::Value e = list_get(&items, i);
+    xmex::Value e = list_get(&items, i);
     needStrArg("join", e, "列表元素");
     total += str_size(&e);
   }
@@ -212,26 +212,26 @@ lite::Value strJoin(const lite::Value &sep, const lite::Value &items) {
   char *buf = nullptr;
   gc_root_push(reinterpret_cast<void **>(&buf));
   buf = static_cast<char *>(
-      gc_alloc(static_cast<size_t>(total) + 1, lite::kScanNone));
+      gc_alloc(static_cast<size_t>(total) + 1, xmex::kScanNone));
   int64_t at = 0;
   for (int64_t i = 0; i < n; ++i) {
     if (i) {
       std::memcpy(buf + at, str_data(&sep), static_cast<size_t>(sepLen));
       at += sepLen;
     }
-    lite::Value e = list_get(&items, i);
+    xmex::Value e = list_get(&items, i);
     const int64_t en = str_size(&e);
     std::memcpy(buf + at, str_data(&e), static_cast<size_t>(en));
     at += en;
   }
   // 先把结果串造出来(这一步可能触发回收,buf 仍被根保护),再退根。
   // 反过来先退根的话,根就白加了。
-  lite::Value out = str_new(buf, total);
+  xmex::Value out = str_new(buf, total);
   gc_root_pop(1);
   return out;
 }
 
-lite::Value strReplace(const lite::Value &s, const lite::Value &oldS, const lite::Value &newS) {
+xmex::Value strReplace(const xmex::Value &s, const xmex::Value &oldS, const xmex::Value &newS) {
   const char *data = str_data(&s);
   const int64_t n = str_size(&s);
   const char *od = str_data(&oldS);
@@ -250,7 +250,7 @@ lite::Value strReplace(const lite::Value &s, const lite::Value &oldS, const lite
   char *buf = nullptr;
   gc_root_push(reinterpret_cast<void **>(&buf));
   buf = static_cast<char *>(
-      gc_alloc(static_cast<size_t>(cap) + 1, lite::kScanNone));
+      gc_alloc(static_cast<size_t>(cap) + 1, xmex::kScanNone));
   int64_t at = 0;
   for (int64_t i = 0; i < n;) {
     if (i + on <= n && std::memcmp(data + i, od, static_cast<size_t>(on)) == 0) {
@@ -263,12 +263,12 @@ lite::Value strReplace(const lite::Value &s, const lite::Value &oldS, const lite
   }
   // 先把结果串造出来(这一步可能触发回收,buf 仍被根保护),再退根。
   // 反过来先退根的话,根就白加了。
-  lite::Value out = str_new(buf, at);
+  xmex::Value out = str_new(buf, at);
   gc_root_pop(1);
   return out;
 }
 
-lite::Value strCount(const lite::Value &s, const lite::Value &sub) {
+xmex::Value strCount(const xmex::Value &s, const xmex::Value &sub) {
   const char *data = str_data(&s);
   const int64_t n = str_size(&s);
   const char *sd = str_data(&sub);
@@ -291,34 +291,34 @@ lite::Value strCount(const lite::Value &s, const lite::Value &sub) {
 // 列表方法
 // ---------------------------------------------------------------------------
 
-lite::Value listPop(const lite::Value &l, const lite::Value *idx) {
-  lite::Value none = none_();
+xmex::Value listPop(const xmex::Value &l, const xmex::Value *idx) {
+  xmex::Value none = none_();
   return list_pop(&l, idx ? idx : &none);
 }
 
-lite::Value dictGet(const lite::Value &d, const lite::Value &key, const lite::Value *def) {
+xmex::Value dictGet(const xmex::Value &d, const xmex::Value &key, const xmex::Value *def) {
   if (def) return dict_get_default(&d, &key, def);
-  lite::Value none = none_();
+  xmex::Value none = none_();
   return dict_get_default(&d, &key, &none);
 }
 
 // keys()/values()/items() 都由"按下标取第 i 项"拼出来
-lite::Value dictProjection(const lite::Value &d, bool wantKeys, bool wantVals) {
+xmex::Value dictProjection(const xmex::Value &d, bool wantKeys, bool wantVals) {
   const int64_t n = dict_len(&d);
   // 元素数组里装的是键/值/新元组 —— 标成 SCAN_NONE 会把它们全放死。
   // 这里是 method.cpp 里唯一需要扫描的缓冲,其余 4 处 char 缓冲都是 SCAN_NONE。
   //
   // ⚠️ 显式根:`items` 里已经填好的那些元组/字符串,在下一轮 tuple_new
   // 触发回收时只被这个局部数组引用着 —— 不登记就会被收掉。
-  lite::Value *items = nullptr;
+  xmex::Value *items = nullptr;
   gc_root_push(reinterpret_cast<void **>(&items));
-  items = n > 0 ? static_cast<lite::Value *>(
-                      gc_alloc_values(static_cast<size_t>(n) * sizeof(lite::Value), 0))
+  items = n > 0 ? static_cast<xmex::Value *>(
+                      gc_alloc_values(static_cast<size_t>(n) * sizeof(xmex::Value), 0))
                 : nullptr;
 
   for (int64_t i = 0; i < n; ++i) {
     if (wantKeys && wantVals) {
-      lite::Value pair[2] = {dict_key_at(&d, i), dict_val_at(&d, i)};
+      xmex::Value pair[2] = {dict_key_at(&d, i), dict_val_at(&d, i)};
       items[i] = tuple_new(pair, 2);
     } else if (wantKeys) {
       items[i] = dict_key_at(&d, i);
@@ -327,7 +327,7 @@ lite::Value dictProjection(const lite::Value &d, bool wantKeys, bool wantVals) {
     }
   }
 
-  lite::Value out = list_new(items, n);   // 此时元素已经在结果列表里了
+  xmex::Value out = list_new(items, n);   // 此时元素已经在结果列表里了
   gc_root_pop(1);
   return out;
 }
@@ -336,8 +336,8 @@ lite::Value dictProjection(const lite::Value &d, bool wantKeys, bool wantVals) {
 
 // ---- 实例方法类型化注册表(迭代协议等实例方法的分派入口) ----
 // 按 (类型名, 方法名) 注册处理函数。迭代器等内置实例在创建处注册方法,
-// call_method 遇到 lite::kInstance 时按实例的 type 属性查表分派。
-using InstanceMethodFn = lite::Value (*)(const lite::Value *inst, lite::Value *args, int64_t nargs);
+// call_method 遇到 xmex::kInstance 时按实例的 type 属性查表分派。
+using InstanceMethodFn = xmex::Value (*)(const xmex::Value *inst, xmex::Value *args, int64_t nargs);
 static std::map<std::string, InstanceMethodFn> g_instance_methods;
 static std::mutex g_instance_methods_mutex;
 
@@ -350,23 +350,23 @@ extern "C" void instance_register_method(const char *type_name, int64_t typeLen,
 }
 
 // 取实例的 type 属性(无则返回空)
-static std::string instanceTypeOf(const lite::Value *inst) {
-    lite::Value k = str_new("type", 4);
-    if (inst->tag != lite::kInstance) return "";
-    struct InstView { int64_t classId; lite::Value attrs; };
+static std::string instanceTypeOf(const xmex::Value *inst) {
+    xmex::Value k = str_new("type", 4);
+    if (inst->tag != xmex::kInstance) return "";
+    struct InstView { int64_t classId; xmex::Value attrs; };
     auto *iv = reinterpret_cast<InstView *>(inst->as.ptr);
     if (!dict_has(&iv->attrs, &k)) return "";
-    lite::Value t = dict_get(&iv->attrs, &k);
-    if (t.tag != lite::kStr) return "";
+    xmex::Value t = dict_get(&iv->attrs, &k);
+    if (t.tag != xmex::kStr) return "";
     return std::string(str_data(&t), str_size(&t));
 }
 
-extern "C" lite::Value call_method(const lite::Value *obj, const char *name,
-                                  int64_t nameLen, lite::Value *args, int64_t nargs) {
+extern "C" xmex::Value call_method(const xmex::Value *obj, const char *name,
+                                  int64_t nameLen, xmex::Value *args, int64_t nargs) {
   const std::string_view m = nm(name, nameLen);
 
   // ---- 实例对象:查类型化方法注册表 ----
-  if (obj->tag == lite::kInstance) {
+  if (obj->tag == xmex::kInstance) {
     std::string tname = instanceTypeOf(obj);
     std::string key = tname + "::" + std::string(m);
     InstanceMethodFn fn = nullptr;
@@ -383,10 +383,10 @@ extern "C" lite::Value call_method(const lite::Value *obj, const char *name,
   }
 
   // 便于书写:下标访问比 args[0] 清楚
-  auto arg = [&](int64_t i) -> const lite::Value & { return args[i]; };
+  auto arg = [&](int64_t i) -> const xmex::Value & { return args[i]; };
 
   // ------------------------------------------------------------------ str
-  if (obj->tag == lite::kStr) {
+  if (obj->tag == xmex::kStr) {
     if (m == "upper") {
       needArgs(m, nargs, 0, 0);
       return strUpper(*obj);
@@ -440,7 +440,7 @@ extern "C" lite::Value call_method(const lite::Value *obj, const char *name,
   }
 
   // ----------------------------------------------------------------- list
-  if (obj->tag == lite::kList) {
+  if (obj->tag == xmex::kList) {
     if (m == "append") {
       needArgs(m, nargs, 1, 1);
       list_append(obj, &arg(0));
@@ -493,7 +493,7 @@ extern "C" lite::Value call_method(const lite::Value *obj, const char *name,
   }
 
   // ----------------------------------------------------------------- dict
-  if (obj->tag == lite::kDict) {
+  if (obj->tag == xmex::kDict) {
     if (m == "get") {
       needArgs(m, nargs, 1, 2);
       return dictGet(*obj, arg(0), nargs == 2 ? &arg(1) : nullptr);
@@ -519,8 +519,8 @@ extern "C" lite::Value call_method(const lite::Value *obj, const char *name,
       needDictArg(m, arg(0));
       const int64_t n = dict_len(&arg(0));
       for (int64_t i = 0; i < n; ++i) {
-        lite::Value k = dict_key_at(&arg(0), i);
-        lite::Value v = dict_val_at(&arg(0), i);
+        xmex::Value k = dict_key_at(&arg(0), i);
+        xmex::Value v = dict_val_at(&arg(0), i);
         dict_set(obj, &k, &v);
       }
       return none_();

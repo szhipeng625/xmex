@@ -1,7 +1,7 @@
 import http.server, json, os, subprocess, tempfile, time
 
-BUNDLE = "/root/pylite_bundle"
-PYLITEC = os.path.join(BUNDLE, "pylitec")
+BUNDLE = "/root/xmex_bundle"
+XMEXC = os.path.join(BUNDLE, "xmexc")
 LIBDIR = os.path.join(BUNDLE, "lib")
 INCDIR = os.path.join(BUNDLE, "include")
 ENV = dict(os.environ, LD_LIBRARY_PATH=LIBDIR)
@@ -12,23 +12,23 @@ RUN_TIMEOUT = 10
 def handle_run(code):
     if len(code) > MAX_SRC:
         return {"ok": False, "stage": "input", "output": "代码超过长度限制"}
-    work = tempfile.mkdtemp(prefix="pylite_web_")
+    work = tempfile.mkdtemp(prefix="xmex_web_")
     src = os.path.join(work, "webrun.pys")
     obj = os.path.join(work, "webrun.o")
     drv = os.path.join(work, "drv.cpp")
     exe = os.path.join(work, "webrun")
     open(src, "w").write(code)
-    open(drv, "w").write("#include <cstdio>\nextern \"C\" void pylite_webrun_main();\nint main(){ pylite_webrun_main(); return 0; }\n")
+    open(drv, "w").write("#include <cstdio>\nextern \"C\" void xmex_webrun_main();\nint main(){ xmex_webrun_main(); return 0; }\n")
     t0 = time.time()
     try:
-        p = subprocess.run([PYLITEC, src, "-o", obj, "-I", "webrun"], capture_output=True, text=True, timeout=COMPILE_TIMEOUT, env=ENV)
+        p = subprocess.run([XMEXC, src, "-o", obj, "-I", "webrun"], capture_output=True, text=True, timeout=COMPILE_TIMEOUT, env=ENV)
     except subprocess.TimeoutExpired:
         return {"ok": False, "stage": "compile", "output": "编译超时"}
     compile_out = (p.stdout + p.stderr).strip()
     if p.returncode != 0 or not os.path.exists(obj):
         return {"ok": False, "stage": "compile", "output": compile_out or "编译失败"}
     try:
-        p2 = subprocess.run(["g++", "-std=c++20", "-I" + INCDIR, drv, obj, "-o", exe, "-L" + LIBDIR, "-lpylite_runtime", LIBDIR + "/libstdc++.so.6", "-Wl,-rpath," + LIBDIR], capture_output=True, text=True, timeout=COMPILE_TIMEOUT, env=ENV)
+        p2 = subprocess.run(["g++", "-std=c++20", "-I" + INCDIR, drv, obj, "-o", exe, "-L" + LIBDIR, "-lxmex_runtime", LIBDIR + "/libstdc++.so.6", "-Wl,-rpath," + LIBDIR], capture_output=True, text=True, timeout=COMPILE_TIMEOUT, env=ENV)
     except subprocess.TimeoutExpired:
         return {"ok": False, "stage": "link", "output": "链接超时"}
     if p2.returncode != 0:
@@ -75,5 +75,5 @@ class H(http.server.BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 18090), H)
-    print("pylite web runner listening on 127.0.0.1:18090", flush=True)
+    print("xmex web runner listening on 127.0.0.1:18090", flush=True)
     srv.serve_forever()

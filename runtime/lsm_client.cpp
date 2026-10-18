@@ -8,7 +8,7 @@
 #include <cstring>
 #include <sstream>
 
-namespace pylite_lsm {
+namespace xmex_lsm {
 
 LsmClient::LsmClient(const std::string& host, int port, int timeout_ms)
     : timeout_ms_(timeout_ms) {
@@ -142,4 +142,4 @@ bool LsmClient::keys(const std::string& pattern, std::vector<std::string>& out) 
     return true;
 }
 
-}  // namespace pylite_lsm
+}  // namespace xmex_lsm

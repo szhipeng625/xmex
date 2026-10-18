@@ -12,7 +12,7 @@ os.makedirs(WORK, exist_ok=True)
 HIST = os.path.join(WORK, "history.json")
 
 REMOTE = "root@47.253.41.10"
-REMOTE_DIR = "/usr/share/nginx/html/pylite/data"
+REMOTE_DIR = "/usr/share/nginx/html/xmex/data"
 
 # 测试阶段：0=非融合(前5分钟) 1=融合(后5分钟)
 MODE = os.environ.get("GPU_MODE", "0")
@@ -54,7 +54,7 @@ def load_hist():
 def main():
     start = time.time()
     hist = load_hist()
-    pylite_on = (MODE == "1")
+    xmex_on = (MODE == "1")
 
     while True:
         elapsed = time.time() - start
@@ -67,7 +67,7 @@ def main():
         # 真实 GPU 读数推算引擎指标
         util = g["util"]
         running = util > 5
-        if pylite_on:
+        if xmex_on:
             thr = int(900 + util * 9) if running else 0
             lat = round(0.42 + (100 - util) * 0.003, 2)
             cache = int(min(88, 55 + util * 0.35)) if running else 0
@@ -82,7 +82,7 @@ def main():
             "t": now.strftime("%H:%M"),
             "thr": thr, "lat": lat, "cache": cache,
             "kv": g["mem_used"], "kernels": kernels, "req": 1 if running else 0,
-            "gpu": util, "pylite": pylite_on,
+            "gpu": util, "xmex": xmex_on,
         }
         hist.append(rec)
         hist = hist[-60:]
@@ -98,9 +98,9 @@ def main():
             "kernel_launches": [h["kernels"] for h in hist],
             "active_reqs": [h["req"] for h in hist],
             "gpu_util": [h["gpu"] for h in hist],
-            "pylite_enabled": [h["pylite"] for h in hist],
+            "xmex_enabled": [h["xmex"] for h in hist],
             "last_updated": now.strftime("%Y-%m-%d %H:%M:%S"),
-            "test_phase": "optimized" if pylite_on else "baseline",
+            "test_phase": "optimized" if xmex_on else "baseline",
             "source": "kimi/CUDA-RealStress",
         }
         with open(os.path.join(WORK, "chart_data.json"), "w") as f:
@@ -114,8 +114,8 @@ def main():
             "gpu_utilization": util, "gpu_memory_used_mb": g["mem_used"],
             "gpu_memory_total_mb": g["mem_total"], "gpu_temp_c": g["temp"],
             "gpu_power_w": g["power"], "engine_status": "stressing" if running else "idle",
-            "pylite_enabled": pylite_on, "model_name": "DeepSeek-R1-14B-AWQ",
-            "source_host": "kimi", "test_phase": "optimized" if pylite_on else "baseline",
+            "xmex_enabled": xmex_on, "model_name": "DeepSeek-R1-14B-AWQ",
+            "source_host": "kimi", "test_phase": "optimized" if xmex_on else "baseline",
         }
         with open(os.path.join(WORK, "metrics.json"), "w") as f:
             json.dump(metrics, f, ensure_ascii=False)
@@ -124,7 +124,7 @@ def main():
            + os.path.join(WORK, "chart_data.json") + " " + os.path.join(WORK, "metrics.json")
            + " " + REMOTE + ":" + REMOTE_DIR + "/", timeout=20)
 
-        phase = "融合优化" if pylite_on else "非融合"
+        phase = "融合优化" if xmex_on else "非融合"
         print("[%s] [%s] GPU %d%% %.0fW %dC, %d tok/s"
               % (now.strftime("%H:%M:%S"), phase, util, g["power"], g["temp"], thr), flush=True)
         time.sleep(60)

@@ -4,7 +4,7 @@ static int64_t raftTraceNowMs(){
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
 }
-#include "../include/pylite/runtime.h"
+#include "../include/xmex/runtime.h"
 #include <cstring>
 #include <sstream>
 
@@ -16,7 +16,7 @@ extern "C" {
 
 // raft.build(config_json) → 返回节点 ID 字符串
 // config_json 格式: {"node_id":"...","bind_addr":"...","cluster_secret":"...","peers":[...],"data_dir":"..."}
-lite::Value raft_build(const char *config_json, int64_t jsonLen) {
+xmex::Value raft_build(const char *config_json, int64_t jsonLen) {
     std::string json(config_json, jsonLen);
 
     // 简单 JSON 解析（生产环境应使用完整 JSON 库）
@@ -90,7 +90,7 @@ lite::Value raft_build(const char *config_json, int64_t jsonLen) {
 }
 
 // raft.erase(node_id) → 删除节点
-lite::Value raft_erase(const char *node_id, int64_t idLen) {
+xmex::Value raft_erase(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
     RaftNode::erase(id);
     std::string result = "{\"status\":\"erased\",\"node_id\":\"" + id + "\"}";
@@ -98,7 +98,7 @@ lite::Value raft_erase(const char *node_id, int64_t idLen) {
 }
 
 // raft.status(node_id) → 返回节点状态 JSON
-lite::Value raft_status(const char *node_id, int64_t idLen) {
+xmex::Value raft_status(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
     auto st = RaftNode::status(id);
 
@@ -125,7 +125,7 @@ lite::Value raft_status(const char *node_id, int64_t idLen) {
 }
 
 // raft.list_nodes() → 返回所有节点 ID 列表 JSON
-lite::Value raft_list_nodes() {
+xmex::Value raft_list_nodes() {
     auto ids = RaftNode::list_nodes();
     std::ostringstream json;
     json << "[";
@@ -143,7 +143,7 @@ lite::Value raft_list_nodes() {
 // ============================================================================
 
 // raft.add(node_id, cmd_type, payload) → 提交命令到集群
-lite::Value raft_add(const char *node_id, int64_t idLen,
+xmex::Value raft_add(const char *node_id, int64_t idLen,
                     const char *cmd_type, int64_t typeLen,
                     const char *payload, int64_t payloadLen) {
     std::string id(node_id, idLen);
@@ -191,7 +191,7 @@ int64_t raft_register_handler(const char *node_id, int64_t idLen,
 // ============================================================================
 
 // raft.register_node(node_id, role, addr) → 注册节点角色
-lite::Value raft_register_node(const char *node_id, int64_t idLen,
+xmex::Value raft_register_node(const char *node_id, int64_t idLen,
                                const char *role, int64_t roleLen,
                                const char *addr, int64_t addrLen) {
     std::string id(node_id, idLen);
@@ -210,7 +210,7 @@ lite::Value raft_register_node(const char *node_id, int64_t idLen,
 }
 
 // raft.cluster_nodes(node_id) → 返回集群节点列表 JSON
-lite::Value raft_cluster_nodes(const char *node_id, int64_t idLen) {
+xmex::Value raft_cluster_nodes(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
 
     std::lock_guard<std::mutex> lk(g_nodes_mutex);
@@ -238,7 +238,7 @@ lite::Value raft_cluster_nodes(const char *node_id, int64_t idLen) {
 }
 
 // raft.mount_storage(node_id, name, path) → 注册共享存储
-lite::Value raft_mount_storage(const char *node_id, int64_t idLen,
+xmex::Value raft_mount_storage(const char *node_id, int64_t idLen,
                                const char *name, int64_t nameLen,
                                const char *path, int64_t pathLen) {
     std::string id(node_id, idLen);
@@ -261,7 +261,7 @@ lite::Value raft_mount_storage(const char *node_id, int64_t idLen,
 // ============================================================================
 
 // raft.plugin_load(node_id, name, so_path) → 加载插件
-lite::Value raft_plugin_load(const char *node_id, int64_t idLen,
+xmex::Value raft_plugin_load(const char *node_id, int64_t idLen,
                              const char *name, int64_t nameLen,
                              const char *so_path, int64_t pathLen) {
     std::string id(node_id, idLen);
@@ -282,7 +282,7 @@ lite::Value raft_plugin_load(const char *node_id, int64_t idLen,
 }
 
 // raft.plugin_unload(node_id, name) → 卸载插件
-lite::Value raft_plugin_unload(const char *node_id, int64_t idLen,
+xmex::Value raft_plugin_unload(const char *node_id, int64_t idLen,
                                const char *name, int64_t nameLen) {
     std::string id(node_id, idLen);
     std::string n(name, nameLen);
@@ -301,7 +301,7 @@ lite::Value raft_plugin_unload(const char *node_id, int64_t idLen,
 }
 
 // raft.plugin_list(node_id) → 列出已加载插件
-lite::Value raft_plugin_list(const char *node_id, int64_t idLen) {
+xmex::Value raft_plugin_list(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
 
     std::lock_guard<std::mutex> lk(g_nodes_mutex);
@@ -339,7 +339,7 @@ lite::Value raft_plugin_list(const char *node_id, int64_t idLen) {
 static std::map<std::string, std::queue<std::string>> g_inbox;
 static std::mutex g_inbox_mutex;
 
-extern "C" lite::Value raft_leader_info(const char *node_id, int64_t idLen) {
+extern "C" xmex::Value raft_leader_info(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
     auto st = RaftNode::status(id);
     std::ostringstream json;
@@ -355,7 +355,7 @@ extern "C" lite::Value raft_leader_info(const char *node_id, int64_t idLen) {
     return str_new(s.c_str(), s.size());
 }
 
-extern "C" lite::Value raft_send(const char *node_id, int64_t idLen,
+extern "C" xmex::Value raft_send(const char *node_id, int64_t idLen,
                      const char *msg, int64_t msgLen) {
     std::string id(node_id, idLen);
     std::string m(msg, msgLen);
@@ -367,7 +367,7 @@ extern "C" lite::Value raft_send(const char *node_id, int64_t idLen,
     return str_new(r.c_str(), r.size());
 }
 
-extern "C" lite::Value raft_recv(const char *node_id, int64_t idLen) {
+extern "C" xmex::Value raft_recv(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
     std::string m;
     {

@@ -5,17 +5,17 @@
 // 实现要点:
 //
 //   * 只有 str/list/dict/tuple 是堆对象,int/float/bool/None 是内联标量、根本
-//     不分配(见 include/pylite/value.h)。所以堆上全是容器,规模有限。
+//     不分配(见 include/xmex/value.h)。所以堆上全是容器,规模有限。
 //   * 根 = **保守扫描本线程的栈与寄存器**,外加一个显式根栈。
-//     扫栈之所以行得通,靠的是 IRGen 的既有约定:每个 lite::Value 都住在栈上的
+//     扫栈之所以行得通,靠的是 IRGen 的既有约定:每个 xmex::Value 都住在栈上的
 //     alloca 里,而且槽位地址几乎都会传给 DLL 里的不透明运行时函数 ——
 //     于是 LLVM 的 mem2reg/SROA 提升不掉它们,值必须留在内存里。
-//   * 不为每种容器写 tracer:lite::List 的 items、lite::Dict 的 keys/vals 都是指向**另外
+//   * 不为每种容器写 tracer:xmex::List 的 items、xmex::Dict 的 keys/vals 都是指向**另外
 //     的块**,保守扫描容器对象就能自动沿指针找到它们。以后加新容器类型不用改这里。
 //
 // ⚠️ 本文件是自举的:GC 内部任何路径都**不得**调用 gc_alloc / alloc。
 // 块表、排序索引、标记栈一律用 malloc/realloc。
-#include "pylite/runtime.h"
+#include "xmex/runtime.h"
 
 #include <csetjmp>
 #include <cstdio>
@@ -25,12 +25,12 @@
 namespace {
 
 // 块头放在 payload **前面**。size 与 GCD 都取 16 的倍数对齐后,malloc 返回
-// 16 字节对齐时 payload 必然是 16 字节对齐的 —— lite::Value 要求 alignof == 8,
-// 而 lite::Str 的 data 紧跟在 int64 之后,所以 16 对齐比最低要求更宽裕。
+// 16 字节对齐时 payload 必然是 16 字节对齐的 —— xmex::Value 要求 alignof == 8,
+// 而 xmex::Str 的 data 紧跟在 int64 之后,所以 16 对齐比最低要求更宽裕。
 struct alignas(16) GcBlock {
   GcBlock *next;        // 块表(单链表,头插,O(1))
   size_t size;          // payload 字节数(16 对齐后)
-  uint32_t kind;        // lite::GcScan
+  uint32_t kind;        // xmex::GcScan
   uint32_t mark;        // 标记位
   uint32_t cellOffset;  // SCAN_VALUES 的单元格起始偏移(元组是 8,其余是 0)
   uint32_t refcount;    // 强引用计数(共享指针语义)
@@ -70,7 +70,7 @@ int64_t g_lastLiveBytes = 0;  // 上次回收后的存活字节(用于自适应�
 bool g_inCollect = false;     // 回收期间禁止重入
 
 // --- 环境变量,读一次就缓存 ---------------------------------------------
-// 沿用项目已有的 PYLITE_NO_OPT=1 风格(见 aot/compiler.cpp)。
+// 沿用项目已有的 XMEX_NO_OPT=1 风格(见 aot/compiler.cpp)。
 struct Options {
   bool off = false;        // 完全关闭回收,只增不还(对照用)
   bool stress = false;     // 每次分配都回收(压测用)
@@ -93,11 +93,11 @@ void maybeCollect();   // 定义在下面的匿名命名空间里
 void loadOptions() {
   if (g_opt.loaded) return;
   g_opt.loaded = true;
-  g_opt.off = envOn("PYLITE_GC_OFF");
-  g_opt.stress = envOn("PYLITE_GC_STRESS");
-  g_opt.stats = envOn("PYLITE_GC_STATS");
-  g_opt.dryRun = envOn("PYLITE_GC_DRYRUN");
-  if (const char *t = std::getenv("PYLITE_GC_THRESHOLD")) {
+  g_opt.off = envOn("XMEX_GC_OFF");
+  g_opt.stress = envOn("XMEX_GC_STRESS");
+  g_opt.stats = envOn("XMEX_GC_STATS");
+  g_opt.dryRun = envOn("XMEX_GC_DRYRUN");
+  if (const char *t = std::getenv("XMEX_GC_THRESHOLD")) {
     g_opt.threshold = std::strtoll(t, nullptr, 10);
   }
   // 统计要打到进程退出为止,所以注册在这里(第一次分配时)而不是要求调用方
@@ -121,18 +121,18 @@ void reportAtExit() {
 
 }  // namespace
 
-extern "C" void *gc_alloc(size_t n, lite::GcScan kind) {
+extern "C" void *gc_alloc(size_t n, xmex::GcScan kind) {
   loadOptions();
 
   // ⚠️ 顺序钉死:**先回收、再取块**。反过来的话,刚拿到但还没被任何人引用的
   // 新块会在同一次分配返回前被自己收掉。
   maybeCollect();
 
-  // 16 字节对齐:lite::Value 需要 alignof == 8,字符串的 data 紧跟 int64,
+  // 16 字节对齐:xmex::Value 需要 alignof == 8,字符串的 data 紧跟 int64,
   // 16 对齐比最低要求更宽裕,也让"指针 16 对齐"这类廉价过滤成为可能。
   const size_t size = (n + 15) & ~static_cast<size_t>(15);
 
-  if (kind == lite::kScanValues && (size % 16) != 0) {
+  if (kind == xmex::kScanValues && (size % 16) != 0) {
     // size 已经向上取整到 16 的倍数,这里只可能在溢出等病态情况下触发
     runtime_error("GC 内部错误:SCAN_VALUES 的长度必须是 16 的倍数");
   }
@@ -162,11 +162,11 @@ extern "C" void *gc_alloc(size_t n, lite::GcScan kind) {
 extern "C" void *gc_alloc_values(size_t n, size_t firstCellOffset) {
   // 先按 VALUES 分配再补 cellOffset:gc_alloc 只校验长度,
   // 偏移的合法性在这里查,报错信息能带上实际值。
-  void *p = gc_alloc(n, lite::kScanValues);
+  void *p = gc_alloc(n, xmex::kScanValues);
 
   const size_t size = (n + 15) & ~static_cast<size_t>(15);
   // 只要求偏移按 8 对齐、且落在块内。**不要求余下的字节正好是整数个单元格**:
-  // 内存已经向上取整到 16,元组(s {int64 len; lite::Value items[]})在 n=0 时
+  // 内存已经向上取整到 16,元组(s {int64 len; xmex::Value items[]})在 n=0 时
   // size=16、偏移 8,尾部那半个格子是块内的已分配内存,按 tag 读一下无害
   // (tag 判定的方向是"只跳过明确是标量的",最坏也只是多保留)。
   if ((firstCellOffset % 8) != 0 || firstCellOffset > size) {
@@ -185,13 +185,13 @@ extern "C" void *gc_alloc_values(size_t n, size_t firstCellOffset) {
 
 // --- 兼容旧 ABI ---------------------------------------------------------
 // alloc / arena_reset 是公开头里的历史符号,用户手写 C++ 会直接调,
-// 签名不能改(见 include/pylite/runtime.h)。转发时按最保守的方式扫描 ——
+// 签名不能改(见 include/xmex/runtime.h)。转发时按最保守的方式扫描 ——
 // 宁可多保留,不可漏根。
 extern "C" void *alloc(size_t n) {
-  return gc_alloc(n, lite::kScanWords);
+  return gc_alloc(n, xmex::kScanWords);
 }
 // --- 引用计数(共享指针 / 弱指针语义) -----------------------------------
-// 计数位记在**块头**里,对象自身数据布局与 lite::Value 布局都不动 —— 不触碰
+// 计数位记在**块头**里,对象自身数据布局与 xmex::Value 布局都不动 —— 不触碰
 // ABI 契约,已编译的目标文件不受影响。
 //
 // 生命周期与 std::shared_ptr / std::weak_ptr 对齐:
@@ -443,12 +443,12 @@ void drainWorklist() {
     const char *p = reinterpret_cast<const char *>(blk) + sizeof(GcBlock);
     const size_t size = blk->size;
 
-    switch (static_cast<lite::GcScan>(blk->kind)) {
-      case lite::kScanNone:
+    switch (static_cast<xmex::GcScan>(blk->kind)) {
+      case xmex::kScanNone:
         // 纯字节缓冲(字符串内容、临时 char 缓冲),里面不可能有指针
         break;
 
-      case lite::kScanWords:
+      case xmex::kScanWords:
         // 保守逐字:容器对象头靠这条照到 items / keys / vals 三个指针。
         // 不需要为每种容器写 tracer —— 指针指向的那个块会继续被扫。
         for (size_t off = 0; off + 8 <= size; off += 8) {
@@ -458,18 +458,18 @@ void drainWorklist() {
         }
         break;
 
-      case lite::kScanValues:
-        // 按 lite::Value 单元格走,tag 决定要不要跟随 payload。
+      case xmex::kScanValues:
+        // 按 xmex::Value 单元格走,tag 决定要不要跟随 payload。
         //
-        // ⚠️ 判定方向:只把**明确是标量**的 tag(lite::kNull/lite::kBool/lite::kInt/
-        // lite::kFloat,即 0..3)跳过,其余(含非法 tag、含未初始化的垃圾)一律跟随。
+        // ⚠️ 判定方向:只把**明确是标量**的 tag(xmex::kNull/xmex::kBool/xmex::kInt/
+        // xmex::kFloat,即 0..3)跳过,其余(含非法 tag、含未初始化的垃圾)一律跟随。
         // 反过来的"只跟随 4 种指针类型"一旦漏一种就是 use-after-free;
         // 这个方向最坏只是多保留。负数 tag 强转成无符号会变成大数 → 不跳过,
         // 正是安全的那一侧。
         for (size_t off = blk->cellOffset; off + 16 <= size; off += 16) {
           int32_t tag;
           std::memcpy(&tag, p + off, 4);
-          if (static_cast<uint32_t>(tag) <= static_cast<uint32_t>(lite::kFloat)) continue;
+          if (static_cast<uint32_t>(tag) <= static_cast<uint32_t>(xmex::kFloat)) continue;
           uintptr_t w;
           std::memcpy(&w, p + off + 8, 8);
           markCandidate(w);
@@ -572,7 +572,7 @@ extern "C" void arena_reset() {
   gc_collect();
 }
 
-extern "C" void gc_stats(lite::GcStats *out) {
+extern "C" void gc_stats(xmex::GcStats *out) {
   if (out == nullptr) return;
   out->alloc_bytes_total = g_allocBytes;
   out->freed_bytes_total = g_freedBytes;

@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-# PyLite 真实监控数据采集与转发 (kimi -> alytun)
-# 采集 kimi 本机 PyLite 引擎与 GPU 真实指标，推送至 alytun 页面数据目录
+# Xmex 真实监控数据采集与转发 (kimi -> alytun)
+# 采集 kimi 本机 Xmex 引擎与 GPU 真实指标，推送至 alytun 页面数据目录
 import json
 import os
 import subprocess
 import datetime
 import random
 
-WORK = "/tmp/pylite_forward"
+WORK = "/tmp/xmex_forward"
 HIST = os.path.join(WORK, "history.json")
 os.makedirs(WORK, exist_ok=True)
 
 REMOTE = "root@47.253.41.10"
-REMOTE_DIR = "/usr/share/nginx/html/pylite/data"
+REMOTE_DIR = "/usr/share/nginx/html/xmex/data"
 
-# PyLite 融合优化后的实测基线 (DeepSeek-R1-14B-AWQ @ RTX 4090)
+# Xmex 融合优化后的实测基线 (DeepSeek-R1-14B-AWQ @ RTX 4090)
 BASE_THROUGHPUT = 1719.0
 BASE_LATENCY = 0.58
 BASE_CACHE_HIT = 78.0
@@ -95,7 +95,7 @@ def main():
         "kv_cache": [h["kv"] for h in hist],
         "active_reqs": [h["req"] for h in hist],
         "last_updated": now.strftime("%Y-%m-%d %H:%M:%S"),
-        "source": "kimi/PyLite",
+        "source": "kimi/Xmex",
     }
     with open(os.path.join(WORK, "chart_data.json"), "w") as f:
         json.dump(chart, f, ensure_ascii=False)
@@ -113,7 +113,7 @@ def main():
         "gpu_temp_c": g["temp"] if g else 0,
         "gpu_power_w": g["power"] if g else 0,
         "engine_status": "running",
-        "pylite_enabled": True,
+        "xmex_enabled": True,
         "model_name": "DeepSeek-R1-14B-AWQ",
         "source_host": "kimi",
     }

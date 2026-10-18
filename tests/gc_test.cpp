@@ -11,7 +11,7 @@
 //      把本该回收的对象留住,断言就成了碰运气。
 //
 // 最高价值的是第三组(不误回收):任何一个块的扫描方式标错,那里就会读到毒字节。
-#include "pylite/runtime.h"
+#include "xmex/runtime.h"
 
 #include <cstdio>
 #include <string>
@@ -26,12 +26,12 @@ void check(bool cond, const std::string &what) {
   if (!cond) ++g_failures;
 }
 
-std::string rep(lite::Value v) {
-  lite::Value s = repr(&v);
+std::string rep(xmex::Value v) {
+  xmex::Value s = repr(&v);
   return std::string(str_data(&s), static_cast<size_t>(str_size(&s)));
 }
 
-void checkRep(lite::Value v, const std::string &want, const std::string &what) {
+void checkRep(xmex::Value v, const std::string &want, const std::string &what) {
   const std::string got = rep(v);
   if (got == want) {
     std::printf("  [ok]   %s → %s\n", what.c_str(), got.c_str());
@@ -42,12 +42,12 @@ void checkRep(lite::Value v, const std::string &want, const std::string &what) {
   }
 }
 
-lite::Value str(const char *s) {
+xmex::Value str(const char *s) {
   return str_new(s, static_cast<int64_t>(std::char_traits<char>::length(s)));
 }
 
-lite::Value list(std::initializer_list<lite::Value> xs) {
-  std::vector<lite::Value> v(xs);
+xmex::Value list(std::initializer_list<xmex::Value> xs) {
+  std::vector<xmex::Value> v(xs);
   return list_new(v.data(), static_cast<int64_t>(v.size()));
 }
 
@@ -55,15 +55,15 @@ lite::Value list(std::initializer_list<lite::Value> xs) {
 __attribute__((noinline)) void makeGarbage(int count, int size) {
   std::vector<char> blob(static_cast<size_t>(size), 'x');
   for (int i = 0; i < count; ++i) {
-    lite::Value s = str_new(blob.data(), size);
+    xmex::Value s = str_new(blob.data(), size);
     (void)s;
   }
 }
 
 // 造一个环:x 引用 y,y 引用 x。引用计数会在这里泄漏,标记-清除不会。
 __attribute__((noinline)) void makeCycle() {
-  lite::Value x = list_new(nullptr, 0);
-  lite::Value y = list_new(nullptr, 0);
+  xmex::Value x = list_new(nullptr, 0);
+  xmex::Value y = list_new(nullptr, 0);
   list_append(&x, &y);
   list_append(&y, &x);
 }
@@ -73,18 +73,18 @@ __attribute__((noinline)) void makeCycle() {
 __attribute__((noinline)) void churn(int rounds, int size) {
   std::vector<char> blob(static_cast<size_t>(size), 'y');
   for (int i = 0; i < rounds; ++i) {
-    lite::Value s = str_new(blob.data(), size);
-    lite::Value l = list_new(nullptr, 0);
+    xmex::Value s = str_new(blob.data(), size);
+    xmex::Value l = list_new(nullptr, 0);
     list_append(&l, &s);
     (void)l;
   }
 }
 
 // 深一层:列表套列表
-__attribute__((noinline)) lite::Value makeNested() {
-  lite::Value inner = list({str("aaaa"), str("bbbb")});
-  lite::Value tail = str("cccc");
-  lite::Value outer = list_new(nullptr, 0);
+__attribute__((noinline)) xmex::Value makeNested() {
+  xmex::Value inner = list({str("aaaa"), str("bbbb")});
+  xmex::Value tail = str("cccc");
+  xmex::Value outer = list_new(nullptr, 0);
   list_append(&outer, &inner);
   list_append(&outer, &tail);
   return outer;
@@ -97,7 +97,7 @@ int main() {
 
   std::printf("=== GC 测试 ===\n\n");
 
-  lite::GcStats mode;
+  xmex::GcStats mode;
   gc_stats(&mode);
   // 干跑模式只下毒、不归还内存,所以"回收了多少字节""存活块数下降"这两类
   // 断言在它下面不成立 —— 它要验的是另一件事:内容有没有被毒坏。
@@ -105,13 +105,13 @@ int main() {
   if (!reclaims) {
     std::printf("  (当前是 %s 模式,与内存归还有关的断言跳过;"
                 "内容完整性断言照常跑)\n\n",
-                mode.disabled ? "PYLITE_GC_OFF" : "PYLITE_GC_DRYRUN");
+                mode.disabled ? "XMEX_GC_OFF" : "XMEX_GC_DRYRUN");
   }
 
   // ---------------------------------------------------------- 守恒律
   std::printf("-- 守恒律(内部自洽,恒成立)--\n");
   {
-    lite::GcStats st;
+    xmex::GcStats st;
     gc_stats(&st);
     check(st.live_bytes + st.freed_bytes_total == st.alloc_bytes_total,
           "live + freed == alloc");
@@ -126,7 +126,7 @@ int main() {
   std::printf("\n-- 真的回收了 --\n");
   {
     const int kCount = 64, kSize = 1 << 20;   // 64 × 1MB
-    lite::GcStats before, after;
+    xmex::GcStats before, after;
     gc_stats(&before);
 
     makeGarbage(kCount, kSize);   // 函数返回后,这些字符串没有任何引用
@@ -152,31 +152,31 @@ int main() {
   std::printf("\n-- 不误回收:只留一条根,内容必须完好 --\n");
   {
     // 列表:items 数组若被标成 SCAN_NONE,元素会被回收,这里就读到 0xDD
-    lite::Value xs = list({str("aaaa"), str("bbbb")});
+    xmex::Value xs = list({str("aaaa"), str("bbbb")});
     gc_collect();
     checkRep(xs, "['aaaa', 'bbbb']", "列表:元素数组被正确扫描");
 
     // 元组:单元格从偏移 8 开始,标错偏移整条链就错位
-    lite::Value tupElems[2] = {str("aaaa"), str("bbbb")};
-    lite::Value tup = tuple_new(tupElems, 2);
+    xmex::Value tupElems[2] = {str("aaaa"), str("bbbb")};
+    xmex::Value tup = tuple_new(tupElems, 2);
     gc_collect();
     checkRep(tup, "('aaaa', 'bbbb')", "元组:单元格偏移 8");
 
     // 字典:keys 与 vals 是两个独立的块
-    lite::Value keys[1] = {str("kk")};
-    lite::Value vals[1] = {str("vvvv")};
-    lite::Value d = dict_new(keys, vals, 1);
+    xmex::Value keys[1] = {str("kk")};
+    xmex::Value vals[1] = {str("vvvv")};
+    xmex::Value d = dict_new(keys, vals, 1);
     gc_collect();
     checkRep(d, "{'kk': 'vvvv'}", "字典:keys/vals 两个数组都被扫描");
 
     // 切片:结果列表的 elems 数组
-    lite::Value lo = int_(0), hi = int_(2), noStep = none_();
-    lite::Value sliced = slice(&xs, &lo, &hi, &noStep);
+    xmex::Value lo = int_(0), hi = int_(2), noStep = none_();
+    xmex::Value sliced = slice(&xs, &lo, &hi, &noStep);
     gc_collect();
     checkRep(sliced, "['aaaa', 'bbbb']", "切片:结果数组被正确扫描");
 
     // 列表套列表:层与层之间靠保守扫描自动传递
-    lite::Value nested = makeNested();
+    xmex::Value nested = makeNested();
     gc_collect();
     checkRep(nested, "[['aaaa', 'bbbb'], 'cccc']", "嵌套列表:逐层可达");
   }
@@ -184,7 +184,7 @@ int main() {
   // ------------------------------------------------------------ 环
   std::printf("\n-- 环(引用计数会在这里泄漏)--\n");
   {
-    lite::GcStats before, after;
+    xmex::GcStats before, after;
     // 先造一轮,让堆长起来,避免把"首次分配"的噪声算进来
     makeCycle();
     gc_collect();
@@ -195,7 +195,7 @@ int main() {
     check(after.live_blocks > before.live_blocks, "50 个环确实占用着堆");
 
     gc_collect();
-    lite::GcStats swept;
+    xmex::GcStats swept;
     gc_stats(&swept);
     std::printf("      回收前 %lld 块 → 回收后 %lld 块\n",
                 static_cast<long long>(after.live_blocks),
@@ -210,7 +210,7 @@ int main() {
   // ------------------------------------------------ 自动触发(阈值)
   std::printf("\n-- 自动回收:阈值触发,存活量有界 --\n");
   {
-    lite::GcStats before, after;
+    xmex::GcStats before, after;
     gc_stats(&before);
 
     const int kRounds = 400, kSize = 256 * 1024;   // 约 100MB 累计分配
@@ -235,7 +235,7 @@ int main() {
   // ------------------------------------------------- 手动入口与幂等
   std::printf("\n-- 手动回收 --\n");
   {
-    lite::GcStats a, b;
+    xmex::GcStats a, b;
     gc_collect();
     gc_stats(&a);
     gc_collect();          // 连着收两次不应出错

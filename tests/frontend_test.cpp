@@ -13,7 +13,7 @@
 #include <memory>
 #include <string>
 
-using namespace pylite;
+using namespace xmex;
 
 namespace {
 

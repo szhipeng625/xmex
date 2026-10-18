@@ -12,27 +12,27 @@
 //
 // 键的相等判定复用 eq —— 单一事实来源。特别注意 eq 对字符串必须按
 // **值**比较(见 arith.cpp),否则这里会退化成按指针认键,`d["a"]` 永远查不到。
-#include "pylite/runtime.h"
+#include "xmex/runtime.h"
 
 #include <cstdio>
 #include <cstring>
 
 // 与 value.h 里的前置声明对应,必须是全局作用域。
-namespace lite {
+namespace xmex {
 struct Dict {
   int64_t len;
   int64_t cap;
   Value *keys;
   Value *vals;
 };
-}  // namespace lite
+}  // namespace xmex
 
 namespace {
 
-lite::Dict *asDict(const lite::Value *v) { return static_cast<lite::Dict *>(v->as.ptr); }
+xmex::Dict *asDict(const xmex::Value *v) { return static_cast<xmex::Dict *>(v->as.ptr); }
 
-void needDict(const lite::Value *v, const char *what) {
-  if (v->tag != lite::kDict) {
+void needDict(const xmex::Value *v, const char *what) {
+  if (v->tag != xmex::kDict) {
     static thread_local char buf[160];
     std::snprintf(buf, sizeof(buf), "%s 需要字典,实际得到 '%s'", what,
                   tag_name(v->tag));
@@ -40,37 +40,37 @@ void needDict(const lite::Value *v, const char *what) {
   }
 }
 
-void reserve(lite::Dict *d, int64_t need) {
+void reserve(xmex::Dict *d, int64_t need) {
   if (need <= d->cap) return;
   int64_t newCap = d->cap ? d->cap : 8;
   while (newCap < need) newCap *= 2;
 
   // ⚠️ 显式根:`keys` 必须在 `vals` 的分配期间活下来 —— 那两次分配之间它只被这个
   // C++ 局部持有,没有任何容器指得到它(理由同 list.cpp 的 newList)。
-  lite::Value *keys = nullptr;
+  xmex::Value *keys = nullptr;
   gc_root_push(reinterpret_cast<void **>(&keys));
-  keys = static_cast<lite::Value *>(gc_alloc_values(
-      static_cast<size_t>(newCap) * sizeof(lite::Value), 0));
+  keys = static_cast<xmex::Value *>(gc_alloc_values(
+      static_cast<size_t>(newCap) * sizeof(xmex::Value), 0));
 
-  auto *vals = static_cast<lite::Value *>(gc_alloc_values(
-      static_cast<size_t>(newCap) * sizeof(lite::Value), 0));
+  auto *vals = static_cast<xmex::Value *>(gc_alloc_values(
+      static_cast<size_t>(newCap) * sizeof(xmex::Value), 0));
   gc_root_pop(1);
   if (d->len > 0) {
-    std::memcpy(keys, d->keys, static_cast<size_t>(d->len) * sizeof(lite::Value));
-    std::memcpy(vals, d->vals, static_cast<size_t>(d->len) * sizeof(lite::Value));
+    std::memcpy(keys, d->keys, static_cast<size_t>(d->len) * sizeof(xmex::Value));
+    std::memcpy(vals, d->vals, static_cast<size_t>(d->len) * sizeof(xmex::Value));
   }
   d->keys = keys;
   d->vals = vals;
   d->cap = newCap;
 }
 
-lite::Dict *newDict(int64_t cap) {
+xmex::Dict *newDict(int64_t cap) {
   // ⚠️ 显式根:`d` 跨过 reserve 里的两次分配(理由同 list.cpp 的 newList)
-  lite::Dict *d = nullptr;
+  xmex::Dict *d = nullptr;
   gc_root_push(reinterpret_cast<void **>(&d));
 
-  // SCAN_WORDS:lite::Dict 的后两个字是 keys / vals 指针
-  d = static_cast<lite::Dict *>(gc_alloc(sizeof(lite::Dict), lite::kScanWords));
+  // SCAN_WORDS:xmex::Dict 的后两个字是 keys / vals 指针
+  d = static_cast<xmex::Dict *>(gc_alloc(sizeof(xmex::Dict), xmex::kScanWords));
   d->len = 0;
   d->cap = 0;
   d->keys = nullptr;
@@ -82,7 +82,7 @@ lite::Dict *newDict(int64_t cap) {
 }
 
 // 按键查找,返回下标;找不到返回 -1
-int64_t findIndex(lite::Dict *d, const lite::Value *key) {
+int64_t findIndex(xmex::Dict *d, const xmex::Value *key) {
   for (int64_t i = 0; i < d->len; ++i) {
     if (eq(d->keys[i], *key).as.i != 0) return i;
   }
@@ -100,9 +100,9 @@ void needIndex(int64_t i, int64_t len) {
 
 }  // namespace
 
-extern "C" lite::Value dict_new(lite::Value *keys, lite::Value *vals, int64_t n) {
+extern "C" xmex::Value dict_new(xmex::Value *keys, xmex::Value *vals, int64_t n) {
   // ⚠️ 显式根:循环里每一次 reserve 都可能触发回收,而 `d` 只被这个局部持有
-  lite::Dict *d = nullptr;
+  xmex::Dict *d = nullptr;
   gc_root_push(reinterpret_cast<void **>(&d));
 
   d = newDict(n);
@@ -121,26 +121,26 @@ extern "C" lite::Value dict_new(lite::Value *keys, lite::Value *vals, int64_t n)
   }
 
   gc_root_pop(1);
-  return ptr(lite::kDict, d);
+  return ptr(xmex::kDict, d);
 }
 
-extern "C" int64_t dict_len(const lite::Value *v) {
+extern "C" int64_t dict_len(const xmex::Value *v) {
   needDict(v, "len()");
   return asDict(v)->len;
 }
 
-extern "C" int32_t dict_has(const lite::Value *v, const lite::Value *key) {
+extern "C" int32_t dict_has(const xmex::Value *v, const xmex::Value *key) {
   needDict(v, "'in'");
   return findIndex(asDict(v), key) >= 0 ? 1 : 0;
 }
 
-extern "C" lite::Value dict_get(const lite::Value *v, const lite::Value *key) {
+extern "C" xmex::Value dict_get(const xmex::Value *v, const xmex::Value *key) {
   needDict(v, "下标访问");
-  lite::Dict *d = asDict(v);
+  xmex::Dict *d = asDict(v);
   const int64_t at = findIndex(d, key);
   if (at < 0) {
     // 用 repr 显示键:字符串键能带出引号,数字键与字符串键不会被混为一谈
-    lite::Value shown = repr(key);
+    xmex::Value shown = repr(key);
     static thread_local char buf[256];
     std::snprintf(buf, sizeof(buf), "字典里没有键 %.*s",
                   static_cast<int>(str_size(&shown)), str_data(&shown));
@@ -149,18 +149,18 @@ extern "C" lite::Value dict_get(const lite::Value *v, const lite::Value *key) {
   return d->vals[at];
 }
 
-extern "C" lite::Value dict_get_default(const lite::Value *v, const lite::Value *key,
-                                       const lite::Value *def) {
+extern "C" xmex::Value dict_get_default(const xmex::Value *v, const xmex::Value *key,
+                                       const xmex::Value *def) {
   needDict(v, "get()");
-  lite::Dict *d = asDict(v);
+  xmex::Dict *d = asDict(v);
   const int64_t at = findIndex(d, key);
   return at < 0 ? *def : d->vals[at];
 }
 
-extern "C" void dict_set(const lite::Value *v, const lite::Value *key,
-                            const lite::Value *val) {
+extern "C" void dict_set(const xmex::Value *v, const xmex::Value *key,
+                            const xmex::Value *val) {
   needDict(v, "下标赋值");
-  lite::Dict *d = asDict(v);
+  xmex::Dict *d = asDict(v);
   const int64_t at = findIndex(d, key);
   if (at >= 0) {
     d->vals[at] = *val;
@@ -172,36 +172,36 @@ extern "C" void dict_set(const lite::Value *v, const lite::Value *key,
   ++d->len;
 }
 
-extern "C" lite::Value dict_key_at(const lite::Value *v, int64_t i) {
+extern "C" xmex::Value dict_key_at(const xmex::Value *v, int64_t i) {
   needDict(v, "遍历");
-  lite::Dict *d = asDict(v);
+  xmex::Dict *d = asDict(v);
   needIndex(i, d->len);
   return d->keys[i];
 }
 
-extern "C" lite::Value dict_val_at(const lite::Value *v, int64_t i) {
+extern "C" xmex::Value dict_val_at(const xmex::Value *v, int64_t i) {
   needDict(v, "遍历");
-  lite::Dict *d = asDict(v);
+  xmex::Dict *d = asDict(v);
   needIndex(i, d->len);
   return d->vals[i];
 }
 
-extern "C" lite::Value dict_pop(const lite::Value *v, const lite::Value *key) {
+extern "C" xmex::Value dict_pop(const xmex::Value *v, const xmex::Value *key) {
   needDict(v, "pop()");
-  lite::Dict *d = asDict(v);
+  xmex::Dict *d = asDict(v);
   const int64_t at = findIndex(d, key);
   if (at < 0) runtime_error("pop(): 字典里没有这个键");
-  lite::Value r = d->vals[at];
+  xmex::Value r = d->vals[at];
   // 后面的元素整体前移,保持插入序
   std::memmove(d->keys + at, d->keys + at + 1,
-               static_cast<size_t>(d->len - at - 1) * sizeof(lite::Value));
+               static_cast<size_t>(d->len - at - 1) * sizeof(xmex::Value));
   std::memmove(d->vals + at, d->vals + at + 1,
-               static_cast<size_t>(d->len - at - 1) * sizeof(lite::Value));
+               static_cast<size_t>(d->len - at - 1) * sizeof(xmex::Value));
   --d->len;
   return r;
 }
 
-extern "C" void dict_clear(const lite::Value *v) {
+extern "C" void dict_clear(const xmex::Value *v) {
   needDict(v, "clear()");
   asDict(v)->len = 0;
 }

@@ -1,5 +1,5 @@
 // 分布式节点创建测试
-// 直接调用 PyLite 运行时的 Raft / Cluster / KvAdmin C API
+// 直接调用 Xmex 运行时的 Raft / Cluster / KvAdmin C API
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

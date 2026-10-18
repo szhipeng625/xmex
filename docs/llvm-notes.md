@@ -45,7 +45,7 @@ declare %lite::Value @add(%lite::Value, %lite::Value)
 
 Win64 ABI 规定:大于 8 字节的聚合体**按引用传递**。GCC 编译
 `lite::Value add(lite::Value a, lite::Value b)` 时严格遵循这条规则。反汇编
-`libpylite_runtime.dll` 里的 `add` 序言可以看到:
+`libxmex_runtime.dll` 里的 `add` 序言可以看到:
 
 ```asm
 add:
@@ -249,7 +249,7 @@ DynamicLibrarySearchGenerator::Load(...)
 // ✅ LLVM 22 的正确形式
 #include "llvm/ExecutionEngine/Orc/EPCDynamicLibrarySearchGenerator.h"
 auto Gen = ExitOnErr(orc::EPCDynamicLibrarySearchGenerator::Load(
-    ES, "libpylite_runtime.dll"));   // 注意第一个参数是 ExecutionSession&
+    ES, "libxmex_runtime.dll"));   // 注意第一个参数是 ExecutionSession&
 J.getMainJITDylib().addGenerator(std::move(Gen));
 ```
 
@@ -317,7 +317,7 @@ JIT 生成的代码要在运行时解析 `add` 这类符号。Windows 上**不�
 "搜索当前进程导出符号"(`GetForCurrentProcess`)—— MinGW 链接出的 exe
 几乎不导出任何东西。
 
-所以 `pylite_runtime` 必须是 `SHARED`(DLL),并用
+所以 `xmex_runtime` 必须是 `SHARED`(DLL),并用
 `EPCDynamicLibrarySearchGenerator::Load` 按名字显式加载。
 
 ### 不要把 __declspec(dllexport) 撒进运行时
@@ -328,10 +328,10 @@ MinGW 对 `-shared` 库**默认自动导出全部符号**。而一旦出现第�
 
 ## 5. 运行时 DLL 的依赖
 
-- `jit_spike.exe` / `pylite_repl.exe` 需要 `libLLVM-22.dll` 在 PATH 上。
+- `jit_spike.exe` / `xmex_repl.exe` 需要 `libLLVM-22.dll` 在 PATH 上。
   从 **UCRT64 shell** 运行即可(`/ucrt64/bin` 已在 PATH);从别处运行会因
   找不到 DLL 而启动失败。
-- `libpylite_runtime.dll` 与 exe 同在 `build/bin/` 下,自动能找到。
+- `libxmex_runtime.dll` 与 exe 同在 `build/bin/` 下,自动能找到。
 
 ## 6. 谓词返回 i32,不返回 i1
 
@@ -342,7 +342,7 @@ ABI 标注不一致(`i1` vs `zeroext i1`),跨 DLL 边界不可靠。
 
 ```bash
 # 从 UCRT64 shell
-cd /d/pylite
+cd /d/xmex
 cmake -G Ninja -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       -DLLVM_DIR="$(llvm-config --cmakedir)"
 cmake --build build

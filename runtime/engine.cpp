@@ -1,4 +1,4 @@
-// PyLite 原生推理服务引擎 —— vLLM 风格的 LLM 推理引擎
+// Xmex 原生推理服务引擎 —— vLLM 风格的 LLM 推理引擎
 //
 // 核心特性：
 //   1. PagedAttention 风格 KV Cache 管理（分页内存，减少碎片）
@@ -11,7 +11,7 @@
 //   - 内存高效：KV Cache 按页分配（每页 16 个 token），减少碎片
 //   - 低延迟：支持动态批处理，新请求可随时加入
 //   - 高吞吐：融合 CUDA 内核 + FlashAttention
-#include "pylite/runtime.h"
+#include "xmex/runtime.h"
 
 #include <cstdio>
 #include <cstring>
@@ -135,13 +135,13 @@ void freeKVPage(int pageId) {
 
 // engine_init(config_json: str) -> str
 // 初始化推理引擎，配置模型参数。
-extern "C" lite::Value engine_init(const lite::Value *configJson) {
+extern "C" xmex::Value engine_init(const xmex::Value *configJson) {
   if (g_engine.initialized) {
     return str_new("{\"status\":\"already_initialized\"}", 32);
   }
 
   // 从配置 JSON 解析模型参数（简化版：使用默认 Qwen2 配置）
-  if (configJson->tag == lite::kStr) {
+  if (configJson->tag == xmex::kStr) {
     const char *json = str_data(configJson);
     // 简单解析关键参数
     auto getInt = [json](const char *key, int def) -> int {
@@ -174,7 +174,7 @@ extern "C" lite::Value engine_init(const lite::Value *configJson) {
   snprintf(buf, sizeof(buf),
     "{\n"
     "  \"status\": \"initialized\",\n"
-    "  \"engine\": \"PyLite Native Inference Engine\",\n"
+    "  \"engine\": \"Xmex Native Inference Engine\",\n"
     "  \"model_config\": {\n"
     "    \"hidden_size\": %d,\n"
     "    \"num_layers\": %d,\n"
@@ -214,26 +214,26 @@ extern "C" lite::Value engine_init(const lite::Value *configJson) {
 // 添加推理请求到批处理队列。
 //
 // 返回请求 ID。
-extern "C" lite::Value engine_add_request(const lite::Value *prompt,
-                                          const lite::Value *maxTokens,
-                                          const lite::Value *temperature,
-                                          const lite::Value *topP,
-                                          const lite::Value *topK) {
+extern "C" xmex::Value engine_add_request(const xmex::Value *prompt,
+                                          const xmex::Value *maxTokens,
+                                          const xmex::Value *temperature,
+                                          const xmex::Value *topP,
+                                          const xmex::Value *topK) {
   if (!g_engine.initialized) {
     runtime_error("引擎未初始化，请先调用 engine_init()");
   }
 
   InferenceRequest req;
   req.requestId = g_engine.nextRequestId++;
-  req.maxTokens = (maxTokens->tag == lite::kInt) ? static_cast<int>(as_int(*maxTokens)) : 256;
-  req.temperature = (temperature->tag == lite::kFloat) ? as_float(*temperature) : 0.7f;
-  req.topP = (topP->tag == lite::kFloat) ? static_cast<float>(as_float(*topP)) : 0.9f;
-  req.topK = (topK->tag == lite::kInt) ? static_cast<int>(as_int(*topK)) : 50;
+  req.maxTokens = (maxTokens->tag == xmex::kInt) ? static_cast<int>(as_int(*maxTokens)) : 256;
+  req.temperature = (temperature->tag == xmex::kFloat) ? as_float(*temperature) : 0.7f;
+  req.topP = (topP->tag == xmex::kFloat) ? static_cast<float>(as_float(*topP)) : 0.9f;
+  req.topK = (topK->tag == xmex::kInt) ? static_cast<int>(as_int(*topK)) : 50;
   req.finished = false;
   req.outputLen = 0;
 
   // 模拟 tokenize（实际需要调用 tokenizer）
-  if (prompt->tag == lite::kStr) {
+  if (prompt->tag == xmex::kStr) {
     const char *p = str_data(prompt);
     int64_t pLen = str_size(prompt);
     req.promptLen = static_cast<int>(pLen);
@@ -274,7 +274,7 @@ extern "C" lite::Value engine_add_request(const lite::Value *prompt,
 // 执行一步批处理推理（处理所有活跃请求的一个 token）。
 //
 // 返回当前批处理状态。
-extern "C" lite::Value engine_step() {
+extern "C" xmex::Value engine_step() {
   if (!g_engine.initialized) {
     runtime_error("引擎未初始化");
   }
@@ -337,7 +337,7 @@ extern "C" lite::Value engine_step() {
 
 // engine_status() -> str
 // 返回引擎运行状态和性能统计。
-extern "C" lite::Value engine_status() {
+extern "C" xmex::Value engine_status() {
   if (!g_engine.initialized) {
     return str_new("{\"status\":\"not_initialized\"}", 28);
   }
@@ -416,15 +416,15 @@ extern "C" void engine_reset() {
 // 一键启动完整的推理服务：初始化引擎 + 启动 HTTP 服务。
 //
 // 这是 engine_init + server_start 的组合快捷方式。
-extern "C" lite::Value engine_serve(const lite::Value *port) {
+extern "C" xmex::Value engine_serve(const xmex::Value *port) {
   // 初始化引擎（使用默认 Qwen2 配置）
   if (!g_engine.initialized) {
-    lite::Value nullConfig = str_new("{}", 2);
+    xmex::Value nullConfig = str_new("{}", 2);
     engine_init(&nullConfig);
   }
 
   // 启动 HTTP 服务
-  lite::Value result = server_start(port);
+  xmex::Value result = server_start(port);
 
   const char *serverInfo = str_data(&result);
   int64_t serverLen = str_size(&result);
@@ -437,7 +437,7 @@ extern "C" lite::Value engine_serve(const lite::Value *port) {
   char buf[2048];
   snprintf(buf, sizeof(buf),
     "{\n"
-    "  \"engine\": \"PyLite Native vLLM-style Inference Engine\",\n"
+    "  \"engine\": \"Xmex Native vLLM-style Inference Engine\",\n"
     "  \"version\": \"1.0.0\",\n"
     "  \"model\": \"DeepSeek-R1-14B-AWQ (Qwen2, 48 layers, 5120 dim)\",\n"
     "  \"kv_cache_mb\": %.1f,\n"

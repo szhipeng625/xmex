@@ -1,6 +1,6 @@
 // 线程 / 进程 / 资源管理验证探针。
-#include "pylite/runtime.h"
-#include "pylite/value.h"
+#include "xmex/runtime.h"
+#include "xmex/value.h"
 
 #include <cstdio>
 #include <cstring>
@@ -19,25 +19,25 @@ static void worker(void *) {
 
 int main() {
   std::printf("=== 线程 ===\n");
-  lite::Value name = str_new("worker", 6);
+  xmex::Value name = str_new("worker", 6);
   thread_register_task(str_data(&name), reinterpret_cast<void *>(&worker), nullptr);
-  lite::Value tid = thread_start(str_data(&name));
-  check(tid.tag == lite::kInt, "启动线程返回线程号");
+  xmex::Value tid = thread_start(str_data(&name));
+  check(tid.tag == xmex::kInt, "启动线程返回线程号");
   const int64_t id = tid.as.i;
   thread_join(id);
   check(g_counter == 100000, "线程任务确实执行完毕");
   check(thread_alive(id) == 0, "线程结束后判活为假");
 
   std::printf("=== 进程 ===\n");
-  lite::Value cmd = str_new("echo hello-concurrency", 22);
-  lite::Value out = process_run(&cmd);
-  check(out.tag == lite::kStr, "同步执行命令返回字符串");
+  xmex::Value cmd = str_new("echo hello-concurrency", 22);
+  xmex::Value out = process_run(&cmd);
+  check(out.tag == xmex::kStr, "同步执行命令返回字符串");
   check(std::strstr(str_data(&out), "hello-concurrency") != nullptr,
         "命令输出符合预期");
 
   std::printf("=== 资源管理 ===\n");
-  lite::Value stats = resource_stats();
-  check(stats.tag == lite::kStr, "资源快照可获取");
+  xmex::Value stats = resource_stats();
+  check(stats.tag == xmex::kStr, "资源快照可获取");
   check(std::strstr(str_data(&stats), "threads") != nullptr,
         "快照包含线程统计");
   resource_reap();

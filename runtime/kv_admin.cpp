@@ -45,14 +45,14 @@ void KvAdmin::persist_node(const KvNode& node) {
     size_t c = lsm_addr_.find(':');
     std::string host = c == std::string::npos ? lsm_addr_ : lsm_addr_.substr(0, c);
     int port = c == std::string::npos ? 6380 : std::atoi(lsm_addr_.substr(c + 1).c_str());
-    pylite_lsm::LsmClient cli(host, port, 2000);
+    xmex_lsm::LsmClient cli(host, port, 2000);
     if (!cli.ok()) return;
     std::ostringstream json;
     json << "{\"node_id\":\"" << node.node_id << "\",\"addr\":\"" << node.addr
          << "\",\"binary\":\"" << node.binary << "\",\"work_dir\":\"" << node.work_dir
          << "\",\"state\":\"" << state_str(node.state) << "\",\"pid\":" << node.pid
          << ",\"restart_count\":" << node.restart_count << "}";
-    cli.set("pylite:kv:node:" + node.node_id, json.str());
+    cli.set("xmex:kv:node:" + node.node_id, json.str());
 }
 
 void KvAdmin::persist_erase(const std::string& node_id) {
@@ -60,9 +60,9 @@ void KvAdmin::persist_erase(const std::string& node_id) {
     size_t c = lsm_addr_.find(':');
     std::string host = c == std::string::npos ? lsm_addr_ : lsm_addr_.substr(0, c);
     int port = c == std::string::npos ? 6380 : std::atoi(lsm_addr_.substr(c + 1).c_str());
-    pylite_lsm::LsmClient cli(host, port, 2000);
+    xmex_lsm::LsmClient cli(host, port, 2000);
     if (!cli.ok()) return;
-    cli.del("pylite:kv:node:" + node_id);
+    cli.del("xmex:kv:node:" + node_id);
 }
 
 void KvAdmin::restore_from_lsm() {
@@ -72,10 +72,10 @@ void KvAdmin::restore_from_lsm() {
     size_t c = lsm_addr_.find(':');
     std::string host = c == std::string::npos ? lsm_addr_ : lsm_addr_.substr(0, c);
     int port = c == std::string::npos ? 6380 : std::atoi(lsm_addr_.substr(c + 1).c_str());
-    pylite_lsm::LsmClient cli(host, port, 3000);
+    xmex_lsm::LsmClient cli(host, port, 3000);
     if (!cli.ok()) return;
     std::vector<std::string> keys;
-    if (!cli.keys("pylite:kv:node:*", keys)) return;
+    if (!cli.keys("xmex:kv:node:*", keys)) return;
     for (const auto& key : keys) {
         std::string val;
         if (!cli.get(key, val)) continue;
@@ -134,9 +134,9 @@ int64_t KvAdmin::spawn_process(const KvNode& node, std::string& error) {
         // 子进程独立成新会话和新进程组:脱离拉起方(一次性执行程序/终端会话)
         // 的生命周期,避免拉起方退出时整个进程组被终止导致托管节点被杀。
         setsid();
-        // 注入节点身份:容器内代码经 PYLITE_NODE_ID 反查所属节点
-        setenv("PYLITE_NODE_ID", node.node_id.c_str(), 1);
-        setenv("PYLITE_NODE_ADDR", node.addr.c_str(), 1);
+        // 注入节点身份:容器内代码经 XMEX_NODE_ID 反查所属节点
+        setenv("XMEX_NODE_ID", node.node_id.c_str(), 1);
+        setenv("XMEX_NODE_ADDR", node.addr.c_str(), 1);
         // 子进程：切换工作目录
         if (!node.work_dir.empty() && chdir(node.work_dir.c_str()) != 0) {
             _exit(126);

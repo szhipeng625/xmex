@@ -1,4 +1,4 @@
-# PyLite
+# Xmex
 
 一个用 LLVM 实现的 Python 风格小语言,能**在编译期编译成目标文件、与 C++ 一起链接**,
 同一套前端也驱动 **ORC JIT** 做运行时执行。
@@ -17,7 +17,7 @@ for i in range(1, a):
 需要 MSYS2 的 UCRT64 环境(不是 MSVCRT 的那个 MinGW):
 
 ```bash
-cd /d/pylite
+cd /d/xmex
 bash build-windows.sh              # 等价于 configure + 构建 + ctest,构建目录 build-win/
 ```
 
@@ -27,7 +27,7 @@ bash build-windows.sh              # 等价于 configure + 构建 + ctest,构建
 
 ```bash
 # 在 D:\msys64\ucrt64.exe 打开的 shell 里
-cd /d/pylite
+cd /d/xmex
 cmake -G Ninja -S . -B build-win -DCMAKE_BUILD_TYPE=RelWithDebInfo \
       -DLLVM_DIR="$(llvm-config --cmakedir)"
 cmake --build build-win
@@ -44,7 +44,7 @@ cc1plus,所以它不是有效的判断方式;要判断就直接编一个 hello w
 
 同样的错配在**运行期**是另一种症状:`libstdc++-6.dll` 这类名字在两套工具链里
 都存在,加载到 MSVCRT 那份就是堆静默损坏(而不是报错)。所以修 PATH 要贯穿
-configure → 构建(要跑 pylitec.exe)→ ctest(要加载 libLLVM-22.dll)全程。
+configure → 构建(要跑 xmexc.exe)→ ctest(要加载 libLLVM-22.dll)全程。
 
 **Linux 构建不受影响**:`CMakeLists.txt` 里平台差异都在 `if(WIN32)`/`else()` 分支内,
 `else()` 侧与原先一致;13 个 POSIX 专有模块(sandbox/cgroup/server/cluster 等)仅在
@@ -68,75 +68,75 @@ for x in xs:
 ### 2. 编译成目标文件,与 C++ 链接
 
 ```bash
-./build-win/bin/pylitec.exe hello.pys -o hello.o
+./build-win/bin/xmexc.exe hello.pys -o hello.o
 ```
 
 产出的是普通 COFF 目标文件。符号命名规则:
 
 | 源文件里的东西 | 生成的符号 |
 |---|---|
-| 顶层语句 | `pylite_<模块名>_main` |
-| `def foo(...)` | `pylite_<模块名>_foo` |
+| 顶层语句 | `xmex_<模块名>_main` |
+| `def foo(...)` | `xmex_<模块名>_foo` |
 
 模块名默认取输入文件的主文件名,可用 `-I <名称>` 覆盖。写一个最小驱动就能跑:
 
 ```cpp
 // main.cpp
-extern "C" void pylite_hello_main();   // 按 ABI 约定,参数/返回值都是 lite::Value*
+extern "C" void xmex_hello_main();   // 按 ABI 约定,参数/返回值都是 lite::Value*
 int main() {
-  pylite_hello_main();
+  xmex_hello_main();
   return 0;
 }
 ```
 
 ```bash
-g++ -std=c++20 main.cpp hello.o -o hello.exe -L./build-win/bin -lpylite_runtime
+g++ -std=c++20 main.cpp hello.o -o hello.exe -L./build-win/bin -lxmex_runtime
 ./hello.exe
 # 1 1
 # 2 4
 # 3 9
 ```
 
-`-L./build-win/bin` 是为了让链接器找到导入库 `libpylite_runtime.dll.a`,
-运行时则需要 `libpylite_runtime.dll` 在 `PATH` 上(它与 `pylitec.exe` 同在
+`-L./build-win/bin` 是为了让链接器找到导入库 `libxmex_runtime.dll.a`,
+运行时则需要 `libxmex_runtime.dll` 在 `PATH` 上(它与 `xmexc.exe` 同在
 `build-win/bin/`,把那个目录加进 PATH 最省事)。
 
-调用带参数的 PyLite 函数时,所有 `lite::Value` 都**按指针**收发 ——
+调用带参数的 Xmex 函数时,所有 `lite::Value` 都**按指针**收发 ——
 这是 Win64 ABI 的硬性要求,详见下面的"两个务必先读的点"。返回值也走第一个
 指针参数(隐藏的 sret):
 
 ```cpp
-#include "pylite/runtime.h"   // 编译时要加 -I./include
+#include "xmex/runtime.h"   // 编译时要加 -I./include
 
-// pylitec 为 `def add(a, b): return a + b` 生成的符号
-extern "C" void pylite_math_add(lite::Value *ret, lite::Value *a, lite::Value *b);
+// xmexc 为 `def add(a, b): return a + b` 生成的符号
+extern "C" void xmex_math_add(lite::Value *ret, lite::Value *a, lite::Value *b);
 
 lite::Value a = int_(1), b = int_(2), r;
-pylite_math_add(&r, &a, &b);     // r 里是 3
+xmex_math_add(&r, &a, &b);     // r 里是 3
 ```
 
 ```bash
 g++ -std=c++20 main.cpp math.o -o math.exe \
-    -I./include -L./build-win/bin -lpylite_runtime
+    -I./include -L./build-win/bin -lxmex_runtime
 ```
 
-想直接看一个**完整的混合程序**(C++ 造数据 → PyLite 算 → C++ 收结果,
+想直接看一个**完整的混合程序**(C++ 造数据 → Xmex 算 → C++ 收结果,
 含字符串与多返回值),见 [examples/mixed/](examples/mixed/README.md)。
 
 ### 3. 查看中间产物
 
 ```bash
-./build-win/bin/pylitec.exe hello.pys -o hello.o --emit-ir hello.ll  # LLVM IR
+./build-win/bin/xmexc.exe hello.pys -o hello.o --emit-ir hello.ll  # LLVM IR
 ./build-win/bin/lex_dump.exe hello.pys                               # token 流
 ./build-win/bin/ast_dump.exe hello.pys                               # 语法树
 ```
 
 排查代码生成问题时先看 `--emit-ir` 的输出。若结果在**开/关优化之间不一致**,
-设 `PYLITE_NO_OPT=1` 再编一次 —— 两者行为不同说明问题出在 IR 本身,
+设 `XMEX_NO_OPT=1` 再编一次 —— 两者行为不同说明问题出在 IR 本身,
 而不是优化器算错:
 
 ```bash
-PYLITE_NO_OPT=1 ./build-win/bin/pylitec.exe hello.pys -o hello-noopt.o
+XMEX_NO_OPT=1 ./build-win/bin/xmexc.exe hello.pys -o hello-noopt.o
 ```
 
 ### 4. 跑测试
@@ -160,8 +160,8 @@ cd build && ctest --output-on-failure
 
 | 现象 | 原因 |
 |---|---|
-| 启动时报缺少 `libpylite_runtime.dll` | 没在 UCRT64 shell 里跑,或没把 `build-win/bin` 加进 PATH |
-| 链接报 `undefined reference to 'add'` | 忘了 `-lpylite_runtime` |
+| 启动时报缺少 `libxmex_runtime.dll` | 没在 UCRT64 shell 里跑,或没把 `build-win/bin` 加进 PATH |
+| 链接报 `undefined reference to 'add'` | 忘了 `-lxmex_runtime` |
 | 编译成功、链接成功,一运行就段错误 | 几乎总是 ABI 边界问题 —— 见下节第 1 点 |
 | 中文输出在测试里比对失败 | 比对框架只支持 ASCII 输出,见 `tests/compare_output.cmake` |
 
@@ -172,11 +172,11 @@ cd build && ctest --output-on-failure
 | `frontend/` | 词法、语法、AST —— **不依赖 LLVM**,可独立测试 |
 | `irgen/` | AST → LLVM IR,含集中管理 ABI 约定的 `abi.h` |
 | `aot/` | 目标文件 / IR 文本生成 |
-| `runtime/` | 运行时库(`libpylite_runtime.dll`),由 GCC 编译 |
-| `include/pylite/value.h` | `lite::Value` —— 整个项目的 ABI 基石 |
+| `runtime/` | 运行时库(`libxmex_runtime.dll`),由 GCC 编译 |
+| `include/xmex/value.h` | `lite::Value` —— 整个项目的 ABI 基石 |
 | `docs/llvm-notes.md` | LLVM 集成的实测结论,**改代码前先读** |
 | `docs/language.md` | 支持的语言子集与已知限制 |
-| `examples/mixed/` | **混合语言完整示例**:C++ 宿主 + PyLite 业务逻辑,附[说明文档](examples/mixed/README.md) |
+| `examples/mixed/` | **混合语言完整示例**:C++ 宿主 + Xmex 业务逻辑,附[说明文档](examples/mixed/README.md) |
 | `tests/e2e/` | 端到端用例:`*.pys` + `*.expected`(可选 `*.in`) |
 | `tests/linktest/` | 手写 C++ 链接编译产物的集成测试 |
 
@@ -207,7 +207,7 @@ cd build && ctest --output-on-failure
 
 运行时带一个**保守式标记-清除**回收器(`runtime/gc.cpp`)。分配量越过阈值时
 自动回收(阈值按上次存活量自适应,下限 1MB),也能用 `gc_collect()` 手动触发;
-`PYLITE_GC_STATS=1` 打印统计,`PYLITE_GC_STRESS=1` 每次分配都回收(压测用)。
+`XMEX_GC_STATS=1` 打印统计,`XMEX_GC_STRESS=1` 每次分配都回收(压测用)。
 
 它不需要 IRGen 做任何配合 —— 根就是**栈与寄存器**,靠保守扫描找到。这能成立,
 是因为本项目本来就有的两条约定:

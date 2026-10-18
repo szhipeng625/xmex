@@ -1,7 +1,7 @@
 // 引用计数(共享指针 / 弱指针语义)验证探针。
 // 直接调用运行时接口,覆盖三种关键情形。
-#include "pylite/runtime.h"
-#include "pylite/value.h"
+#include "xmex/runtime.h"
+#include "xmex/value.h"
 
 #include <cstdio>
 
@@ -14,7 +14,7 @@ static void check(bool ok, const char *what) {
 int main() {
   std::printf("=== 情形一:强引用归零且无弱引用 -> 立即销毁 ===\n");
   {
-    lite::Value s = str_new("hello", 5);
+    xmex::Value s = str_new("hello", 5);
     void *p = s.as.ptr;
     incref(p);
     check(refcount(p) == 1, "加引用后计数为 1");
@@ -26,7 +26,7 @@ int main() {
 
   std::printf("=== 情形二:强引用归零但有弱引用 -> 只失效,不回收 ===\n");
   {
-    lite::Value s = str_new("world", 5);
+    xmex::Value s = str_new("world", 5);
     void *p = s.as.ptr;
     incref(p);
     weakref(p);
@@ -40,7 +40,7 @@ int main() {
 
   std::printf("=== 情形三:强弱并存时,回收不应提前归还内存 ===\n");
   {
-    lite::Value s = str_new("kept", 4);
+    xmex::Value s = str_new("kept", 4);
     void *p = s.as.ptr;
     incref(p);
     weakref(p);

@@ -4,7 +4,7 @@
 
 #include <string>
 
-namespace pylite {
+namespace xmex {
 
 namespace {
 
@@ -799,4 +799,4 @@ ExprPtr Parser::wrapList(std::vector<ExprPtr> items, int line, int col,
   return t;
 }
 
-}  // namespace pylite
+}  // namespace xmex

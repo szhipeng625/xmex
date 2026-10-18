@@ -1,4 +1,4 @@
-// PyLite 抽象语法树。
+// Xmex 抽象语法树。
 //
 // 用继承 + 虚函数表达节点:节点种类不多(二十来个),虚函数带来的开销在前端
 // 阶段完全无所谓,换来的是 dump/遍历写法最直白。IRGen 那边用 dynamic_cast
@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-namespace pylite {
+namespace xmex {
 
 // 语言里出现的类型名。Any 作为"未标注"的默认值。
 enum class TypeName { Any, Int, Float, Bool, Str };
@@ -248,4 +248,4 @@ struct Module {
   void dump(std::ostream &os) const;
 };
 
-}  // namespace pylite
+}  // namespace xmex

@@ -1,7 +1,7 @@
-# 分布式节点创建测试 —— PyLite 版本
+# 分布式节点创建测试 —— Xmex 版本
 # 调用 kv / cluster / raft 模块接口
 
-print("=== 分布式节点创建测试 (PyLite) ===")
+print("=== 分布式节点创建测试 (Xmex) ===")
 print("")
 
 # 1. 通过 kv 模块构建三个分布式节点
@@ -67,4 +67,4 @@ print("   全局节点:", raft_nodes)
 
 print("")
 print("=== 测试完成 ===")
-print("成功通过 PyLite 调用 kv/cluster/raft 模块创建分布式节点并组建集群。")
+print("成功通过 Xmex 调用 kv/cluster/raft 模块创建分布式节点并组建集群。")

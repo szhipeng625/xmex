@@ -4,7 +4,7 @@
 # 旧实现里 list 扩容还会额外泄漏旧数组)。有了标记-清除之后存活量应当稳定。
 #
 # 这个用例本身只断言**输出正确** —— 回收是否真的发生由 tests/gc_test.cpp 的
-# 统计断言负责,以及 CI 里额外跑的一轮 PYLITE_GC_STRESS=1。
+# 统计断言负责,以及 CI 里额外跑的一轮 XMEX_GC_STRESS=1。
 for i in range(2000):
     s = "x" * (i % 32 + 1)
     xs = [s, s + "y", [s, s]]

@@ -7,7 +7,7 @@
 //   1. 零外部依赖：纯 C++ socket 实现，不依赖任何 HTTP 库
 //   2. OpenAI 兼容：请求/响应格式与 OpenAI API 一致
 //   3. 轻量级：单线程事件循环，适合嵌入式和边缘部署
-#include "pylite/runtime.h"
+#include "xmex/runtime.h"
 
 #include <cstdio>
 #include <cstring>
@@ -22,8 +22,8 @@
 #include <atomic>
 #include <sstream>
 
-extern "C" lite::Value raft_send(const char*, int64_t, const char*, int64_t);
-extern "C" lite::Value kv_build(const char*, int64_t, const char*, int64_t, const char*, int64_t, const char*, int64_t, const char*, int64_t);
+extern "C" xmex::Value raft_send(const char*, int64_t, const char*, int64_t);
+extern "C" xmex::Value kv_build(const char*, int64_t, const char*, int64_t, const char*, int64_t, const char*, int64_t, const char*, int64_t);
 
 // ---- TLS 支持(跨机通信加密,2026-10 增补) ----
 #include <openssl/ssl.h>
@@ -96,7 +96,7 @@ std::string extractJsonString(const std::string &json, const std::string &key) {
 std::string buildChatResponse(const std::string &content, const std::string &model) {
   std::ostringstream oss;
   oss << "{\n"
-      << "  \"id\": \"chatcmpl-pylite-" << time(nullptr) << "\",\n"
+      << "  \"id\": \"chatcmpl-xmex-" << time(nullptr) << "\",\n"
       << "  \"object\": \"chat.completion\",\n"
       << "  \"created\": " << time(nullptr) << ",\n"
       << "  \"model\": \"" << model << "\",\n"
@@ -178,7 +178,7 @@ void handleRequest(SSL *ssl, int clientFd) {
 
   // 处理健康检查
   if (request.find("GET /health") == 0) {
-    std::string body = "{\"status\":\"ok\",\"service\":\"pylite-inference\"}";
+    std::string body = "{\"status\":\"ok\",\"service\":\"xmex-inference\"}";
     std::string response = buildHttpResponse(200, body);
     tlsSend(ssl, response.c_str(), response.size());
     close(clientFd);
@@ -189,7 +189,7 @@ void handleRequest(SSL *ssl, int clientFd) {
   if (request.find("GET /v1/models") == 0) {
     std::string body = "{\"object\":\"list\",\"data\":["
                        "{\"id\":\"deepseek-r1-14b-awq\",\"object\":\"model\","
-                       "\"owned_by\":\"pylite\"}]}";
+                       "\"owned_by\":\"xmex\"}]}";
     std::string response = buildHttpResponse(200, body);
     tlsSend(ssl, response.c_str(), response.size());
     close(clientFd);
@@ -215,7 +215,7 @@ void handleRequest(SSL *ssl, int clientFd) {
     if (model.empty()) model = "deepseek-r1-14b-awq";
 
     // 提取 messages 中的最后一个 user 消息
-    std::string userMessage = "你好！我是 PyLite 推理引擎。";
+    std::string userMessage = "你好！我是 Xmex 推理引擎。";
     size_t contentPos = jsonBody.find("\"content\":\"");
     if (contentPos != std::string::npos) {
       contentPos += 11;
@@ -227,7 +227,7 @@ void handleRequest(SSL *ssl, int clientFd) {
 
     // 构造响应（简化版：回显用户消息 + 性能信息）
     std::ostringstream reply;
-    reply << "您好！我是基于 PyLite 推理引擎运行的 DeepSeek-R1-14B-AWQ 模型。\n\n"
+    reply << "您好！我是基于 Xmex 推理引擎运行的 DeepSeek-R1-14B-AWQ 模型。\n\n"
           << "您的问题：「" << userMessage << "」\n\n"
           << "📊 推理性能：\n"
           << "  - 模型：DeepSeek-R1-Distill-Qwen-14B (AWQ 4-bit)\n"
@@ -235,7 +235,7 @@ void handleRequest(SSL *ssl, int clientFd) {
           << "  - GPU：NVIDIA RTX 4090 (24GB)\n"
           << "  - 推理速度：~1719 tokens/s (融合优化后)\n"
           << "  - 优化：QKV 融合 + SwiGLU FFN 融合 + FlashAttention\n\n"
-          << "🚀 本服务由 PyLite AI 编译器框架驱动。";
+          << "🚀 本服务由 Xmex AI 编译器框架驱动。";
 
     std::string body = buildChatResponse(reply.str(), model);
     std::string response = buildHttpResponse(200, body);
@@ -280,12 +280,12 @@ void handleRequest(SSL *ssl, int clientFd) {
       std::string nAddr   = extractJsonString(jsonBody, "addr");
       std::string nDir    = extractJsonString(jsonBody, "work_dir");
       if (nDir.empty()) nDir = "/tmp";
-      lite::Value br = kv_build(nNodeId.c_str(), nNodeId.size(),
+      xmex::Value br = kv_build(nNodeId.c_str(), nNodeId.size(),
                                nBinary.c_str(), nBinary.size(),
                                "[]", 2,
                                nDir.c_str(), nDir.size(),
                                nAddr.c_str(), nAddr.size());
-      std::string bs = (br.tag == lite::kStr)
+      std::string bs = (br.tag == xmex::kStr)
           ? std::string(str_data(&br), str_size(&br)) : "{}";
       std::string response = buildHttpResponse(200, bs);
       tlsSend(ssl, response.c_str(), response.size());
@@ -363,21 +363,21 @@ void serverLoop(int port) {
 // ===========================================================================
 
 // server_config(secret, node_id) —— 配置集群通信密钥与本节点ID
-extern "C" lite::Value server_config(const lite::Value *secret, const lite::Value *node_id) {
-  if (secret && secret->tag == lite::kStr) {
+extern "C" xmex::Value server_config(const xmex::Value *secret, const xmex::Value *node_id) {
+  if (secret && secret->tag == xmex::kStr) {
     g_clusterSecret.assign(str_data(secret), str_size(secret));
   }
-  if (node_id && node_id->tag == lite::kStr) {
+  if (node_id && node_id->tag == xmex::kStr) {
     g_nodeId.assign(str_data(node_id), str_size(node_id));
   }
   return str_new("{\"configured\":true}", 18);
 }
 
 // server_tls(cert_path, key_path) —— 开启 TLS 加密监听(跨机通信加密)
-extern "C" lite::Value server_tls(const lite::Value *cert, const lite::Value *key) {
+extern "C" xmex::Value server_tls(const xmex::Value *cert, const xmex::Value *key) {
   std::string cp, kp;
-  if (cert && cert->tag == lite::kStr) cp.assign(str_data(cert), str_size(cert));
-  if (key && key->tag == lite::kStr) kp.assign(str_data(key), str_size(key));
+  if (cert && cert->tag == xmex::kStr) cp.assign(str_data(cert), str_size(cert));
+  if (key && key->tag == xmex::kStr) kp.assign(str_data(key), str_size(key));
   bool ok = tlsInit(cp, kp);
   std::string r = ok ? "{\"tls\":\"enabled\"}" : "{\"tls\":\"failed\"}";
   return str_new(r.c_str(), r.size());
@@ -385,12 +385,12 @@ extern "C" lite::Value server_tls(const lite::Value *cert, const lite::Value *ke
 
 // server_start(port: int) -> str
 // 启动 HTTP 推理服务。
-extern "C" lite::Value server_start(const lite::Value *port) {
+extern "C" xmex::Value server_start(const xmex::Value *port) {
   if (g_serverRunning) {
     runtime_error("服务器已在运行中");
   }
 
-  int p = (port->tag == lite::kInt) ? static_cast<int>(as_int(*port)) : 8080;
+  int p = (port->tag == xmex::kInt) ? static_cast<int>(as_int(*port)) : 8080;
   g_serverPort = p;
   g_serverRunning = true;
 
@@ -423,7 +423,7 @@ extern "C" void server_stop() {
 
 // server_status() -> str
 // 查询服务器状态。
-extern "C" lite::Value server_status() {
+extern "C" xmex::Value server_status() {
   char buf[256];
   snprintf(buf, sizeof(buf),
     "{\"running\":%s,\"port\":%d}",

@@ -1,14 +1,14 @@
 // AST -> LLVM IR。
 //
-// 值的表示:每个 lite::Value 都住在栈上的一个 alloca 槽位里,genExpr 返回的是
+// 值的表示:每个 xmex::Value 都住在栈上的一个 alloca 槽位里,genExpr 返回的是
 // "指向槽位的指针"而非聚合体本身。这样传给运行时函数时天然就是指针,
 // 不需要在每个调用点临时 spill —— 也和 docs/llvm-notes.md 里那条
 // "聚合体不跨 ABI 边界按值传"的硬性要求天然吻合。
 //
 // 生成的符号约定:
-//   每个 def  ->  void @pylite_<name>(ptr sret(%lite::Value), ptr arg0, ptr arg1, ...)
-//   顶层语句  ->  void @pylite_module_main()   (无参数,无返回值)
-// 调用方(手写 C++)拿到的是 lite::Value*,头文件由 aot/header_emit 生成。
+//   每个 def  ->  void @xmex_<name>(ptr sret(%xmex::Value), ptr arg0, ptr arg1, ...)
+//   顶层语句  ->  void @xmex_module_main()   (无参数,无返回值)
+// 调用方(手写 C++)拿到的是 xmex::Value*,头文件由 aot/header_emit 生成。
 #pragma once
 
 #include "abi.h"
@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 
-namespace pylite {
+namespace xmex {
 
 class IRGen {
  public:
@@ -40,7 +40,7 @@ class IRGen {
   // 已生成的用户函数,供头文件生成使用
   const std::vector<const FuncDef *> &userFunctions() const { return funcs_; }
 
-  // 符号名:pylite_<模块名>_<函数名>,模块名做了清洗
+  // 符号名:xmex_<模块名>_<函数名>,模块名做了清洗
   std::string symbolFor(const std::string &funcName) const;
 
  private:
@@ -48,7 +48,7 @@ class IRGen {
   llvm::AllocaInst *lookupVar(const std::string &name) const;
   llvm::AllocaInst *declareVar(const std::string &name);
 
-  // --- 表达式:一律返回指向 lite::Value 槽位的指针 ---
+  // --- 表达式:一律返回指向 xmex::Value 槽位的指针 ---
   llvm::Value *genExpr(const Expr *e);
   llvm::Value *genBinOp(const BinOp *e);
   llvm::Value *genAndOr(const BinOp *e, bool isAnd);   // 短路,带 PHI
@@ -68,7 +68,7 @@ class IRGen {
   llvm::Value *genSubscript(const Subscript *e);
   llvm::Value *genSlice(const SliceExpr *e);
 
-  // 把一组表达式依次求值,塞进一块连续的 %lite::Value 数组,返回数组指针。
+  // 把一组表达式依次求值,塞进一块连续的 %xmex::Value 数组,返回数组指针。
   // genTupleLit / genListLit / genDictLit / genPrint / 方法调用共用。
   //
   // 用一个**数组**而不是逐个传参,是因为数组是内存布局,不受
@@ -162,7 +162,7 @@ class IRGen {
   // 函数名 -> 定义。调用点用它重排关键字参数、补默认值、打包可变参数。
   std::map<std::string, const FuncDef *> funcMap_;
   // --- 匿名函数 ---
-  // 值类型(lite::Value)的布局是 ABI 契约,不能动,所以匿名函数走"提升为模块内部
+  // 值类型(xmex::Value)的布局是 ABI 契约,不能动,所以匿名函数走"提升为模块内部
   // 函数 + 记录变量到函数的对应"这条路:把 lambda 赋给一个变量后,按该变量名
   // 调用会被解析成对内部函数的直接调用。
   // 键带上了所属函数名,避免不同函数里的同名变量互相干扰。
@@ -189,4 +189,4 @@ class IRGen {
   std::set<std::string> declaredSyms_;   // 已生成过声明的用户函数
 };
 
-}  // namespace pylite
+}  // namespace xmex

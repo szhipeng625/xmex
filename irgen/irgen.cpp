@@ -1,5 +1,5 @@
 #include "irgen.h"
-#include "pylite/value.h"
+#include "xmex/value.h"
 
 #include "frontend/lexer.h"  // SourceError
 
@@ -11,7 +11,7 @@
 
 using namespace llvm;
 
-namespace pylite {
+namespace xmex {
 
 namespace {
 
@@ -46,14 +46,14 @@ std::string sanitize(const std::string &s) {
 
 }  // namespace
 
-// 注意这里必须写 llvm::Module。在 namespace pylite 里,不带限定的 `Module`
-// 指的是 pylite::Module(AST 根节点),而不是 LLVM 的模块。
+// 注意这里必须写 llvm::Module。在 namespace xmex 里,不带限定的 `Module`
+// 指的是 xmex::Module(AST 根节点),而不是 LLVM 的模块。
 IRGen::IRGen(llvm::Module &M, std::string moduleName)
     : M_(M), Ctx_(M.getContext()), abi_(M), moduleName_(std::move(moduleName)),
       B_(M.getContext()) {}
 
 std::string IRGen::symbolFor(const std::string &funcName) const {
-  return "pylite_" + sanitize(moduleName_) + "_" + sanitize(funcName);
+  return "xmex_" + sanitize(moduleName_) + "_" + sanitize(funcName);
 }
 
 [[noreturn]] static void irError(int line, int col, const std::string &msg) {
@@ -94,7 +94,7 @@ AllocaInst *IRGen::declareVar(const std::string &name) {
 // ---------------------------------------------------------------------------
 // 表达式
 //
-// 全部返回"指向 lite::Value 槽位的指针"。
+// 全部返回"指向 xmex::Value 槽位的指针"。
 // ---------------------------------------------------------------------------
 
 Value *IRGen::genExpr(const Expr *e) {
@@ -164,9 +164,9 @@ Value *IRGen::genExpr(const Expr *e) {
 // ---------------------------------------------------------------------------
 
 void IRGen::storeElement(Value *array, size_t i, Value *slot) {
-  // 只能用**单索引**的 GEP。写成 {0, i} 是错的:源类型 %lite::Value 是结构体,
+  // 只能用**单索引**的 GEP。写成 {0, i} 是错的:源类型 %xmex::Value 是结构体,
   // 第二个索引会被解释成"结构体的第几个字段",而不是数组的第几个元素。
-  // 单索引形式按 sizeof(%lite::Value) 步进,正是数组取址要的语义。
+  // 单索引形式按 sizeof(%xmex::Value) 步进,正是数组取址要的语义。
   Value *elem = B_.CreateGEP(abi_.valueTy(), array,
                              B_.getInt64(static_cast<uint64_t>(i)), "elem.ptr");
   B_.CreateStore(B_.CreateLoad(abi_.valueTy(), slot), elem);
@@ -298,8 +298,8 @@ Value *IRGen::genUnaryOp(const UnaryOp *e) {
 
 // len(x) —— 内建。运行时按 tag 分派到字符串/列表/字典/元组。
 //
-// len 返回的是 i64 而不是 lite::Value,这里负责装箱。不把 len 的返回类型
-// 定成 lite::Value 是有意的:for 循环的条件要直接拿它跟下标比 i64;而且同一个
+// len 返回的是 i64 而不是 xmex::Value,这里负责装箱。不把 len 的返回类型
+// 定成 xmex::Value 是有意的:for 循环的条件要直接拿它跟下标比 i64;而且同一个
 // 符号名如果出现两种签名,Abi 的按名字缓存会静默配错 FunctionType。
 Value *IRGen::genLen(const Call *e) {
   if (e->args.size() != 1) {
@@ -380,7 +380,7 @@ Value *IRGen::genMethodCall(const Call *e, const Attribute *attr) {
     }
   }
   if (!recvClass.empty()) {
-      const std::string sym = "pylite_" + sanitize(moduleName_) + "_class_" +
+      const std::string sym = "xmex_" + sanitize(moduleName_) + "_class_" +
                               sanitize(recvClass) + "_" + sanitize(attr->name);
       Function *f = M_.getFunction(sym);
       if (f == nullptr) {
@@ -413,7 +413,7 @@ Value *IRGen::genMethodCall(const Call *e, const Attribute *attr) {
 }
 
 // 内置模块名 → 运行时函数前缀映射
-// 让 PyLite 脚本能直接写 docker.run()、llm.chat() 等原生语法
+// 让 Xmex 脚本能直接写 docker.run()、llm.chat() 等原生语法
 static const char *builtinModulePrefix(const std::string &mod, const std::string &fn) {
   // Docker 模块
   if (mod == "docker") {
@@ -523,7 +523,7 @@ static const char *builtinModulePrefix(const std::string &mod, const std::string
     if (fn == "exec") return "sandbox_exec_v";
     if (fn == "destroy") return "sandbox_destroy_v";
   }
-  // Raft 分布式共识模块（通过 _v 适配器接收 lite::Value* 参数）
+  // Raft 分布式共识模块（通过 _v 适配器接收 xmex::Value* 参数）
   if (mod == "raft") {
     if (fn == "build") return "raft_build_v";
     if (fn == "erase") return "raft_erase_v";
@@ -541,7 +541,7 @@ static const char *builtinModulePrefix(const std::string &mod, const std::string
     if (fn == "send") return "raft_send_v";
     if (fn == "recv") return "raft_recv_v";
   }
-  // Cluster 集群管理模块（通过 _v 适配器接收 lite::Value* 参数）
+  // Cluster 集群管理模块（通过 _v 适配器接收 xmex::Value* 参数）
   if (mod == "cluster") {
     if (fn == "connect") return "cluster_connect_v";
     if (fn == "disconnect") return "cluster_disconnect_v";
@@ -555,7 +555,7 @@ static const char *builtinModulePrefix(const std::string &mod, const std::string
     if (fn == "broadcast") return "cluster_broadcast_v";
     if (fn == "health_all") return "cluster_health_all_v";
   }
-  // KvAdmin 节点生命周期管理模块（通过 _v 适配器接收 lite::Value* 参数）
+  // KvAdmin 节点生命周期管理模块（通过 _v 适配器接收 xmex::Value* 参数）
   if (mod == "kv") {
     if (fn == "build") return "kv_build_v";
     if (fn == "add") return "kv_add_v";
@@ -688,7 +688,7 @@ Value *IRGen::genCall(const Call *e) {
       const char *rtFn = builtinModulePrefix(modName->id, attr->name);
       if (rtFn) {
         // 内置模块调用: 直接映射到运行时函数
-        // 所有参数都是 lite::Value* 指针，通过 callN 传递
+        // 所有参数都是 xmex::Value* 指针，通过 callN 传递
         std::vector<Value *> argSlots;
         std::vector<Type *> argTypes;
         argSlots.reserve(e->args.size());
@@ -896,7 +896,7 @@ Value *IRGen::genInput(const InputExpr *e) {
   return abi_.callPtrI64(B_, "tuple_new", arr, B_.getInt64(static_cast<uint64_t>(n)));
 }
 
-// print(a, b, ...) —— 内建。把各参数求值后放进一个 lite::Value 数组,
+// print(a, b, ...) —— 内建。把各参数求值后放进一个 xmex::Value 数组,
 // 把数组指针交给运行时。数组是内存布局,不受"聚合体不按值传"的限制。
 Value *IRGen::genPrint(const Call *e) {
   const size_t n = e->args.size();
@@ -1047,7 +1047,7 @@ void IRGen::genAssign(const Assign *s) {
   std::vector<Value *> slots;
   slots.reserve(n);
   for (size_t i = 0; i < n; ++i) {
-    // out 是 %lite::Value 数组,用单索引 GEP 取第 i 个元素
+    // out 是 %xmex::Value 数组,用单索引 GEP 取第 i 个元素
     slots.push_back(
         B_.CreateGEP(abi_.valueTy(), out, B_.getInt64(static_cast<uint64_t>(i))));
   }
@@ -1172,7 +1172,7 @@ void IRGen::genFor(const For *s) {
   Value *probeSlot = abi_.newSlot(B_, "for.probe");
   abi_.copySlot(B_, probeSlot, probe);
   Value *tag = abi_.loadTag(B_, probeSlot);
-  Value *isInst = B_.CreateICmpEQ(tag, ConstantInt::get(abi_.i32Ty(), lite::kInstance), "is.inst");
+  Value *isInst = B_.CreateICmpEQ(tag, ConstantInt::get(abi_.i32Ty(), xmex::kInstance), "is.inst");
   Function *fn = curFn_;
   BasicBlock *iterBB = BasicBlock::Create(Ctx_, "for.iterproto", fn);
   BasicBlock *countBB = BasicBlock::Create(Ctx_, "for.count", fn);
@@ -1250,7 +1250,7 @@ void IRGen::genForIteratorProtocol(const For *s, Value *itObj, BasicBlock *merge
       {itObj, mname, B_.getInt64(4), nullArgs, B_.getInt64(0)});
   // item 是槽位指针,取 tag 判 None
   Value *tag = abi_.loadTag(B_, item);
-  Value *isNone = B_.CreateICmpEQ(tag, ConstantInt::get(abi_.i32Ty(), lite::kNull), "is.none");
+  Value *isNone = B_.CreateICmpEQ(tag, ConstantInt::get(abi_.i32Ty(), xmex::kNull), "is.none");
   B_.CreateCondBr(isNone, exitBB, bodyBB);
   B_.SetInsertPoint(bodyBB);
   AllocaInst *ivar = lookupVar(s->var);
@@ -1340,7 +1340,7 @@ void IRGen::traceEnterFn(const std::string &name) {
   }
   GlobalVariable *gname = B_.CreateGlobalString(llvm::StringRef(name));
   // trace_begin(const char*) -> i64:直接声明 —— callUnaryI64 对非 len
-  // 的函数会按 (lite::Value)->i64 声明并加载 valueTy,参数类型对不上。
+  // 的函数会按 (xmex::Value)->i64 声明并加载 valueTy,参数类型对不上。
   Function *beginFn = M_.getFunction("trace_begin");
   if (beginFn == nullptr) {
     beginFn = Function::Create(
@@ -1373,8 +1373,8 @@ void IRGen::traceEnterFnArgs(const std::string &name,
   GlobalVariable *gNameArr = new GlobalVariable(
       M_, nameArrTy, true, GlobalValue::InternalLinkage, nameArr, "trace.argnames");
 
-  // 实参值:栈上指针数组,存放各参数槽位地址(运行时按 lite::Value* 取值)。
-  // 注意:运行时接口的最后一参是 lite::Value*const*,所以这里传的必须是
+  // 实参值:栈上指针数组,存放各参数槽位地址(运行时按 xmex::Value* 取值)。
+  // 注意:运行时接口的最后一参是 xmex::Value*const*,所以这里传的必须是
   // 指针数组,不能是把值铺开的数组 —— 否则运行时会把首个值当成地址解引用。
   AllocaInst *valsArr = B_.CreateAlloca(ArrayType::get(abi_.ptrTy(), n),
                                         nullptr, "trace.argptrs");
@@ -1410,7 +1410,7 @@ void IRGen::traceExitFn(const std::string &name, bool ok) {
 }
 void IRGen::traceVar(const std::string &name, Value *slot) {
   if (!traceOn_) return;
-  // trace_var_value(const char*, const lite::Value*):由运行时负责 repr 转换,
+  // trace_var_value(const char*, const xmex::Value*):由运行时负责 repr 转换,
   // 编译器侧不用关心字符串怎么取、怎么保证 NUL 结尾 —— 全部收敛到这一个入口。
   GlobalVariable *gname = B_.CreateGlobalString(llvm::StringRef(name));
   abi_.callVoidN(B_, "trace_var_value",
@@ -1489,9 +1489,9 @@ void IRGen::genFunction(const FuncDef *fd) {
 
 // 匿名函数:值类型没有函数表示,所以这里把它"提升"成一个模块内部函数,
 // 并记下最近生成的符号。赋值语句据此把变量名绑定到该内部函数,调用点再
-// 把它解析成直接调用。全程只动编译期信息,不碰 lite::Value 的布局。
+// 把它解析成直接调用。全程只动编译期信息,不碰 xmex::Value 的布局。
 Value *IRGen::genLambdaExpr(const Lambda *lam) {
-  const std::string sym = "pylite_" + sanitize(moduleName_) + "_lambda" +
+  const std::string sym = "xmex_" + sanitize(moduleName_) + "_lambda" +
                           std::to_string(lambdaCounter_++);
   // 闭包捕获:把当前可见的外层变量记下来,作为内部函数的**前置参数**随调用传入。
   // 这样匿名函数用到的外层数据就一起带进来了,不需要运行时环境对象,
@@ -1564,7 +1564,7 @@ void IRGen::genLambdaDef(const Lambda *lam, Function *fn) {
 // 嵌套函数:写在函数体里的 def。处理方式与匿名函数完全一致 ——
 // 提升为模块内部函数,并把外层变量作为前置参数捕获进来。
 void IRGen::genNestedFuncDef(const FuncDef *fd) {
-  const std::string sym = "pylite_" + sanitize(moduleName_) + "_lambda" +
+  const std::string sym = "xmex_" + sanitize(moduleName_) + "_lambda" +
                           std::to_string(lambdaCounter_++);
   std::vector<std::string> caps;
   if (!scopes_.empty()) {
@@ -1622,7 +1622,7 @@ void IRGen::genClassDef(const ClassDef *cd) {
   // 先声明所有方法,这样方法之间互相调用(含递归)不受定义顺序限制。
   std::map<std::string, Function *> methodFns;
   for (const auto &m : cd->methods) {
-    const std::string sym = "pylite_" + sanitize(moduleName_) + "_class_" +
+    const std::string sym = "xmex_" + sanitize(moduleName_) + "_class_" +
                             sanitize(cd->name) + "_" + sanitize(m->name);
     // 方法的声明参数**就是它的形参列表** —— 代表实例的那个形参(惯例写 self)
     // 本就在列表里,不能再额外加一个,否则声明与调用会差一个参数。
@@ -1700,7 +1700,7 @@ Value *IRGen::genInstanceNew(const std::string &className, const Call *e) {
   if (cm != classMap_.end()) {
     for (const auto &m : cm->second->methods) {
       if (m->name != "__init__") continue;
-      const std::string sym = "pylite_" + sanitize(moduleName_) + "_class_" +
+      const std::string sym = "xmex_" + sanitize(moduleName_) + "_class_" +
                               sanitize(className) + "___init__";
       Function *f = M_.getFunction(sym);
       if (f == nullptr) break;
@@ -1756,7 +1756,7 @@ void IRGen::genTopLevel(const Module &ast) {
           Function::ExternalLinkage, "trace_set_dump", M_);
     }
     GlobalVariable *dumpPath = B_.CreateGlobalString(
-        llvm::StringRef("/tmp/pylite_trace/events.sse"));
+        llvm::StringRef("/tmp/xmex_trace/events.sse"));
     B_.CreateCall(dumpFn, {dumpPath});
     Function *startFn = M_.getFunction("trace_start");
     if (startFn == nullptr) {
@@ -1813,7 +1813,7 @@ void IRGen::generate(const Module &ast) {
 
     std::vector<Type *> params;
     for (size_t i = 0; i < fd->params.size(); ++i) params.push_back(abi_.valueTy());
-    // 内部实现:模块内按值收发 lite::Value(符号带 __impl 后缀)
+    // 内部实现:模块内按值收发 xmex::Value(符号带 __impl 后缀)
     auto *ft = FunctionType::get(abi_.valueTy(), params, false);
     Function::Create(ft, Function::ExternalLinkage, sym, M_);
     // 导出包装:C++ 宿主约定 —— void(ptr sret, ptr args...)
@@ -1853,4 +1853,4 @@ void IRGen::generate(const Module &ast) {
   genTopLevel(ast);
 }
 
-}  // namespace pylite
+}  // namespace xmex

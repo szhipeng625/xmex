@@ -1,6 +1,6 @@
 # mount_demo.pys — 通用挂载协议演示(全后端版)
 # 演示: 同一套标准操作接口, 驱动 MySQL / OJ / Docker / MQ / MID / CloudJudge 六种后端
-# 使用: cat mount_protocol.pys mount_demo.pys > app.pys && pylitec app.pys -o app.o -I app
+# 使用: cat mount_protocol.pys mount_demo.pys > app.pys && xmexc app.pys -o app.o -I app
 
 mounts = {}
 

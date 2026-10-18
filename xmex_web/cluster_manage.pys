@@ -1,8 +1,8 @@
-# cluster_manage.pys — Docker / MySQL / MQ / MID 统一纳管到 PyLite 分布式节点
+# cluster_manage.pys — Docker / MySQL / MQ / MID 统一纳管到 Xmex 分布式节点
 # 作用: 把容器化组件注册为受管节点, 由分布式管理面统一调度、健康探测、故障重启
-# 运行: cat mount_protocol.pys cluster_manage.pys > app.pys && pylitec app.pys -o app.o -I app
+# 运行: cat mount_protocol.pys cluster_manage.pys > app.pys && xmexc app.pys -o app.o -I app
 
-print("=== PyLite 分布式组件纳管 ===")
+print("=== Xmex 分布式组件纳管 ===")
 
 print("接入协调服务:", kv.persist("43.157.39.171:6380"))
 

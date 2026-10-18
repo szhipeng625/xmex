@@ -41,12 +41,12 @@ int main(int argc, char **argv) {
   buf << in.rdbuf();
 
   try {
-    pylite::Lexer lexer(buf.str(), argv[1]);
+    xmex::Lexer lexer(buf.str(), argv[1]);
     for (const auto &t : lexer.tokenize()) {
-      std::printf("%4d:%-3d  %-8s  %s\n", t.line, t.col, pylite::tokName(t.kind),
+      std::printf("%4d:%-3d  %-8s  %s\n", t.line, t.col, xmex::tokName(t.kind),
                   visible(t.text).c_str());
     }
-  } catch (const pylite::SourceError &e) {
+  } catch (const xmex::SourceError &e) {
     std::fprintf(stderr, "%s\n", e.what());
     return 1;
   }

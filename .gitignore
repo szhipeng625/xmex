@@ -23,6 +23,7 @@ CTestTestfile.cmake
 *~
 
 # 临时文件
+*.bak
 /tmp/
 *.log
 *.pyc

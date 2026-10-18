@@ -7,7 +7,7 @@
 //   1. 零外部依赖：纯 C++ 实现，不依赖 Python/HuggingFace 库
 //   2. 内存高效：vocab 使用哈希表存储，支持 150K+ 词表
 //   3. 与推理引擎集成：直接输出 token ID 供模型使用
-#include "pylite/runtime.h"
+#include "xmex/runtime.h"
 
 #include <cstdio>
 #include <cstring>
@@ -80,8 +80,8 @@ int jsonGetIntVal(const char *json, const char *key) {
 
 // tokenizer_load(path: str) -> str
 // 加载 tokenizer.json 文件。
-extern "C" lite::Value tokenizer_load(const lite::Value *path) {
-  if (path->tag != lite::kStr) {
+extern "C" xmex::Value tokenizer_load(const xmex::Value *path) {
+  if (path->tag != xmex::kStr) {
     runtime_error("tokenizer_load() 需要一个字符串参数: path");
   }
 
@@ -232,12 +232,12 @@ extern "C" lite::Value tokenizer_load(const lite::Value *path) {
 // 将文本编码为 token ID 列表（JSON 数组格式）。
 //
 // 使用简单的 BPE 分词：从长到短匹配 vocab 中的 token。
-extern "C" lite::Value tokenizer_encode(const lite::Value *text) {
+extern "C" xmex::Value tokenizer_encode(const xmex::Value *text) {
   if (!g_tokenizer.loaded) {
     runtime_error("tokenizer 未加载，请先调用 tokenizer_load()");
   }
 
-  if (text->tag != lite::kStr) {
+  if (text->tag != xmex::kStr) {
     runtime_error("tokenizer_encode() 需要一个字符串参数: text");
   }
 
@@ -310,12 +310,12 @@ extern "C" lite::Value tokenizer_encode(const lite::Value *text) {
 
 // tokenizer_decode(token_ids: str) -> str
 // 将 token ID 列表（JSON 数组）解码为文本。
-extern "C" lite::Value tokenizer_decode(const lite::Value *tokenIds) {
+extern "C" xmex::Value tokenizer_decode(const xmex::Value *tokenIds) {
   if (!g_tokenizer.loaded) {
     runtime_error("tokenizer 未加载，请先调用 tokenizer_load()");
   }
 
-  if (tokenIds->tag != lite::kStr) {
+  if (tokenIds->tag != xmex::kStr) {
     runtime_error("tokenizer_decode() 需要一个字符串参数: token_ids (JSON 数组)");
   }
 
@@ -356,7 +356,7 @@ extern "C" lite::Value tokenizer_decode(const lite::Value *tokenIds) {
 
 // tokenizer_info() -> str
 // 返回 tokenizer 的详细信息。
-extern "C" lite::Value tokenizer_info() {
+extern "C" xmex::Value tokenizer_info() {
   if (!g_tokenizer.loaded) {
     runtime_error("tokenizer 未加载");
   }

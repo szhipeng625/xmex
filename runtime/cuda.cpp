@@ -2,12 +2,12 @@
 //
 // 设计原则：
 //   1. 使用 CUDA Driver API（libcuda.so）而非 Runtime API，更底层、更灵活；
-//   2. PTX 代码由 LLVM NVPTX 后端生成，PyLite 负责编排编译流程；
+//   2. PTX 代码由 LLVM NVPTX 后端生成，Xmex 负责编排编译流程；
 //   3. 提供 GPU 内存分配、数据传输、内核启动等核心原语；
-//   4. 所有操作返回 lite::Value，与 PyLite 类型系统无缝对接。
+//   4. 所有操作返回 xmex::Value，与 Xmex 类型系统无缝对接。
 //
 // 注意：需要 NVIDIA GPU 和 CUDA 驱动。当前机器有 RTX 4090，满足条件。
-#include "pylite/runtime.h"
+#include "xmex/runtime.h"
 
 #include <cstdio>
 #include <cstring>
@@ -160,7 +160,7 @@ char *captureCommand(const char *cmd) {
 
 // cuda_info() -> str
 // 返回 GPU 设备信息。
-extern "C" lite::Value cuda_info() {
+extern "C" xmex::Value cuda_info() {
   if (!initCudaDevice()) {
     trace_op("cuda", "info", "", 0, 0);
     runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
@@ -201,26 +201,26 @@ extern "C" lite::Value cuda_info() {
 // 通过 nvcc 编译为 PTX 中间表示。
 //
 // 返回 PTX 代码字符串。
-extern "C" lite::Value cuda_compile_ptx(const lite::Value *kernelCode,
-                                        const lite::Value *kernelName) {
-  if (kernelCode->tag != lite::kStr) {
+extern "C" xmex::Value cuda_compile_ptx(const xmex::Value *kernelCode,
+                                        const xmex::Value *kernelName) {
+  if (kernelCode->tag != xmex::kStr) {
     runtime_error("cuda_compile_ptx() 需要字符串参数: kernel_code");
   }
   auto traceT0 = std::chrono::steady_clock::now();
-  const char *traceKn = (kernelName->tag == lite::kStr) ? str_data(kernelName) : "";
+  const char *traceKn = (kernelName->tag == xmex::kStr) ? str_data(kernelName) : "";
 
   const char *code = str_data(kernelCode);
   int64_t codeLen = str_size(kernelCode);
 
   // 将内核代码写入临时文件
-  const char *tmpFile = "/tmp/pylite_kernel.cu";
+  const char *tmpFile = "/tmp/xmex_kernel.cu";
   FILE *fp = fopen(tmpFile, "w");
   if (!fp) runtime_error("cuda_compile_ptx() 失败: 无法创建临时文件");
   fwrite(code, 1, static_cast<size_t>(codeLen), fp);
   fclose(fp);
 
   // 调用 nvcc 编译为 PTX
-  const char *ptxFile = "/tmp/pylite_kernel.ptx";
+  const char *ptxFile = "/tmp/xmex_kernel.ptx";
   size_t cmdCap = static_cast<size_t>(codeLen) + 256;
   char *cmd = static_cast<char *>(malloc(cmdCap));
   if (!cmd) runtime_error("内存不足");
@@ -257,7 +257,7 @@ extern "C" lite::Value cuda_compile_ptx(const lite::Value *kernelCode,
   ptxCode[ptxSize] = '\0';
   fclose(fp);
 
-  lite::Value result = str_new(ptxCode, static_cast<int64_t>(ptxSize));
+  xmex::Value result = str_new(ptxCode, static_cast<int64_t>(ptxSize));
   trace_op("cuda", "compile_ptx", traceKn, 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());
@@ -283,21 +283,21 @@ extern "C" lite::Value cuda_compile_ptx(const lite::Value *kernelCode,
 //    {"type":"ptr","value":"gpu_buf_1"}]
 //
 // 返回执行状态字符串。
-extern "C" lite::Value cuda_launch_kernel(const lite::Value *ptxCode,
-                                          const lite::Value *kernelName,
-                                          const lite::Value *gridX,
-                                          const lite::Value *gridY,
-                                          const lite::Value *gridZ,
-                                          const lite::Value *blockX,
-                                          const lite::Value *blockY,
-                                          const lite::Value *blockZ,
-                                          const lite::Value *args) {
+extern "C" xmex::Value cuda_launch_kernel(const xmex::Value *ptxCode,
+                                          const xmex::Value *kernelName,
+                                          const xmex::Value *gridX,
+                                          const xmex::Value *gridY,
+                                          const xmex::Value *gridZ,
+                                          const xmex::Value *blockX,
+                                          const xmex::Value *blockY,
+                                          const xmex::Value *blockZ,
+                                          const xmex::Value *args) {
   if (!initCudaDevice()) {
     trace_op("cuda", "launch_kernel", "", 0, 0);
     runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
   }
 
-  if (ptxCode->tag != lite::kStr || kernelName->tag != lite::kStr) {
+  if (ptxCode->tag != xmex::kStr || kernelName->tag != xmex::kStr) {
     runtime_error("cuda_launch_kernel() 需要 ptx_code 和 kernel_name 字符串参数");
   }
   auto traceT0 = std::chrono::steady_clock::now();
@@ -320,12 +320,12 @@ extern "C" lite::Value cuda_launch_kernel(const lite::Value *ptxCode,
   }
 
   // 获取网格和块维度
-  int64_t gx = (gridX->tag == lite::kInt) ? as_int(*gridX) : 1;
-  int64_t gy = (gridY->tag == lite::kInt) ? as_int(*gridY) : 1;
-  int64_t gz = (gridZ->tag == lite::kInt) ? as_int(*gridZ) : 1;
-  int64_t bx = (blockX->tag == lite::kInt) ? as_int(*blockX) : 256;
-  int64_t by = (blockY->tag == lite::kInt) ? as_int(*blockY) : 1;
-  int64_t bz = (blockZ->tag == lite::kInt) ? as_int(*blockZ) : 1;
+  int64_t gx = (gridX->tag == xmex::kInt) ? as_int(*gridX) : 1;
+  int64_t gy = (gridY->tag == xmex::kInt) ? as_int(*gridY) : 1;
+  int64_t gz = (gridZ->tag == xmex::kInt) ? as_int(*gridZ) : 1;
+  int64_t bx = (blockX->tag == xmex::kInt) ? as_int(*blockX) : 256;
+  int64_t by = (blockY->tag == xmex::kInt) ? as_int(*blockY) : 1;
+  int64_t bz = (blockZ->tag == xmex::kInt) ? as_int(*blockZ) : 1;
 
   // 启动内核（简化版：无参数传递，实际参数通过 args JSON 解析）
   void *kernelParams[] = {nullptr};  // 占位
@@ -364,13 +364,13 @@ extern "C" lite::Value cuda_launch_kernel(const lite::Value *ptxCode,
 // 在 GPU 上分配内存，返回内存句柄（用于后续操作）。
 //
 // 返回格式: "gpu_ptr:0x..."
-extern "C" lite::Value cuda_alloc(const lite::Value *size) {
+extern "C" xmex::Value cuda_alloc(const xmex::Value *size) {
   if (!initCudaDevice()) {
     trace_op("cuda", "alloc", "", 0, 0);
     runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
   }
 
-  if (size->tag != lite::kInt) {
+  if (size->tag != xmex::kInt) {
     runtime_error("cuda_alloc() 需要一个整数参数: size");
   }
   auto traceT0 = std::chrono::steady_clock::now();
@@ -394,13 +394,13 @@ extern "C" lite::Value cuda_alloc(const lite::Value *size) {
 
 // cuda_free(handle: str) -> None
 // 释放 GPU 内存。
-extern "C" void cuda_free(const lite::Value *handle) {
+extern "C" void cuda_free(const xmex::Value *handle) {
   if (!initCudaDevice()) {
     trace_op("cuda", "free", "", 0, 0);
     runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
   }
 
-  if (handle->tag != lite::kStr) {
+  if (handle->tag != xmex::kStr) {
     runtime_error("cuda_free() 需要一个字符串参数: handle");
   }
   auto traceT0 = std::chrono::steady_clock::now();
@@ -419,14 +419,14 @@ extern "C" void cuda_free(const lite::Value *handle) {
 
 // cuda_memcpy_to_device(handle: str, data: str) -> None
 // 将数据从主机复制到 GPU。
-extern "C" void cuda_memcpy_to_device(const lite::Value *handle,
-                                          const lite::Value *data) {
+extern "C" void cuda_memcpy_to_device(const xmex::Value *handle,
+                                          const xmex::Value *data) {
   if (!initCudaDevice()) {
     trace_op("cuda", "memcpy_to_device", "", 0, 0);
     runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
   }
 
-  if (handle->tag != lite::kStr || data->tag != lite::kStr) {
+  if (handle->tag != xmex::kStr || data->tag != xmex::kStr) {
     runtime_error("cuda_memcpy_to_device() 需要 (str, str) 参数");
   }
   auto traceT0 = std::chrono::steady_clock::now();
@@ -452,14 +452,14 @@ extern "C" void cuda_memcpy_to_device(const lite::Value *handle,
 
 // cuda_memcpy_from_device(handle: str, size: int) -> str
 // 从 GPU 复制数据到主机，返回数据字符串。
-extern "C" lite::Value cuda_memcpy_from_device(const lite::Value *handle,
-                                               const lite::Value *size) {
+extern "C" xmex::Value cuda_memcpy_from_device(const xmex::Value *handle,
+                                               const xmex::Value *size) {
   if (!initCudaDevice()) {
     trace_op("cuda", "memcpy_from_device", "", 0, 0);
     runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
   }
 
-  if (handle->tag != lite::kStr || size->tag != lite::kInt) {
+  if (handle->tag != xmex::kStr || size->tag != xmex::kInt) {
     runtime_error("cuda_memcpy_from_device() 需要 (str, int) 参数");
   }
   auto traceT0 = std::chrono::steady_clock::now();
@@ -484,7 +484,7 @@ extern "C" lite::Value cuda_memcpy_from_device(const lite::Value *handle,
   }
 
   buf[sz] = '\0';
-  lite::Value result = str_new(buf, sz);
+  xmex::Value result = str_new(buf, sz);
   trace_op("cuda", "memcpy_from_device", h, 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());

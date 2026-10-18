@@ -52,7 +52,7 @@ index f5e0ef5..b2c8841 100644
 -add_subdirectory(tools/cli)
 -add_subdirectory(tools/storage_client)
 -add_subdirectory(tools/e2e)
-+# 以下测试和工具子目录在 PyLite 项目中因路径解析问题暂时跳过
++# 以下测试和工具子目录在 Xmex 项目中因路径解析问题暂时跳过
 +# add_subdirectory(tools/cli)
 +# add_subdirectory(tools/storage_client)
 +# add_subdirectory(tools/e2e)

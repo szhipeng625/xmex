@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-namespace pylite {
+namespace xmex {
 
 // 词法/语法错误统一用这个异常抛出。编译器自身可以用异常 ——
 // "不用异常"的限制只针对 IRGen 生成的目标代码(见 docs/llvm-notes.md R1)。
@@ -69,4 +69,4 @@ class Lexer {
   bool atLineStart_ = true;
 };
 
-}  // namespace pylite
+}  // namespace xmex

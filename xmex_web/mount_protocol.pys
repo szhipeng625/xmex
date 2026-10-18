@@ -1,10 +1,10 @@
-# mount_protocol.pys — PyLite 通用挂载协议库(平铺版, 兼容双版本)
+# mount_protocol.pys — Xmex 通用挂载协议库(平铺版, 兼容双版本)
 # 场景: 挂载 MySQL、CloudJudge、OJ、Docker 等不同后端时操作各不相同,
 #       本库定义统一协议接口, .pys 脚本只面向标准操作编程,
 #       由协议层把标准操作分发到对应后端的适配实现.
-# 用法: pylitec 为单文件编译, 使用时拼接后再编译:
+# 用法: xmexc 为单文件编译, 使用时拼接后再编译:
 #       cat mount_protocol.pys your_main.pys > app.pys
-#       pylitec app.pys -o app.o -I app
+#       xmexc app.pys -o app.o -I app
 
 # ---------- 1. 标准操作码(协议层唯一约定) ----------
 MP_READ = "READ"

@@ -4,8 +4,8 @@
 //   1. 启动通信服务后,curl 能连上事件流
 //   2. 函数进入/退出事件能被正确推送
 //   3. 错误事件能被正确推送
-#include "pylite/runtime.h"
-#include "pylite/value.h"
+#include "xmex/runtime.h"
+#include "xmex/value.h"
 
 #include <cstdio>
 #include <cstring>

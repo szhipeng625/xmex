@@ -2,7 +2,7 @@
 
 #include <ostream>
 
-namespace pylite {
+namespace xmex {
 
 namespace {
 
@@ -350,4 +350,4 @@ void Module::dump(std::ostream &os) const {
   for (const auto &s : body) s->dump(os, 1);
 }
 
-}  // namespace pylite
+}  // namespace xmex
