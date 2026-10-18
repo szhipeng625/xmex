@@ -1,5 +1,5 @@
 #include "irgen.h"
-#include "xmex/value.h"
+#include "xmex/value_tags.h"  // 只要 tag 常量,理由见 value_tags.h
 
 #include "frontend/lexer.h"  // SourceError
 
@@ -575,6 +575,10 @@ static const char *builtinModulePrefix(const std::string &mod, const std::string
     if (fn == "group_replicas") return "kv_group_replicas_v";
     if (fn == "group_status") return "kv_group_status_v";
     if (fn == "group_destroy") return "kv_group_destroy_v";
+    // 动态库 FFI 方法(2026-10 增补):加载 .dll/.so 并按描述符调用其函数。
+    // 详见 runtime/ffi.h 与 docs/ffi-design.md。
+    if (fn == "ffi") return "kv_ffi_v";
+    if (fn == "ffi_list") return "kv_ffi_list_v";
     // 节点内置 MQ 队列方法(2026-10 增补)
     if (fn == "enqueue") return "kv_enqueue_v";
     if (fn == "dequeue") return "kv_dequeue_v";

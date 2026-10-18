@@ -1,0 +1,42 @@
+# ffi_demo.pys —— 动态库 FFI 的端到端演示
+#
+# 编译:
+#   ./xmexc ffi_demo.pys -o ffi_demo.o
+# 链接:
+#   g++ -std=c++20 ffi_main.cpp ffi_demo.o -o ffi_demo.exe \
+#       -I../include -L./bin -lxmex_runtime
+#
+# 这里只演示编译与链接;实际调用见 ffi_main.cpp。
+
+lib = kv.ffi("./ffi_test_dll.dll")
+print("loaded:", lib)
+
+# 看这个库里有哪些函数
+print("symbols:", lib.symbols())
+
+# 看某个函数的签名
+print("describe dll_add:", lib.describe("dll_add"))
+print("describe dll_greet:", lib.describe("dll_greet"))
+
+# 调用
+r = lib.call("dll_add", [3, 4])
+print("dll_add(3,4):", r)
+
+r = lib.call("dll_greet", ["world"])
+print("dll_greet(world):", r)
+
+r = lib.call("dll_scale", [2.5, 4])
+print("dll_scale(2.5,4):", r)
+
+r = lib.call("dll_flip", [True])
+print("dll_flip(True):", r)
+
+# 错误路径
+r = lib.call("dll_fail", [])
+print("dll_fail():", r)
+
+r = lib.call("no_such_function", [])
+print("no_such_function():", r)
+
+# 全局 introspection
+print("ffi_list:", kv.ffi_list())

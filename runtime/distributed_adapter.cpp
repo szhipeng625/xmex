@@ -278,6 +278,10 @@ xmex::Value kv_group_status_v(const xmex::Value* group_id) {
 xmex::Value kv_group_destroy_v(const xmex::Value* group_id) {
     return kv_group_destroy(group_id);
 }
+
+// ====== 动态库 FFI 适配器(2026-10 增补) ======
+// 见文件末尾的跨平台实现 —— 它不能放在 Linux-only 段里。
+
 xmex::Value int_to_str_v(const xmex::Value* v) {
     int64_t n = (v && v->tag == xmex::kInt) ? v->as.i : 0;
     return int_to_str(n);
@@ -286,3 +290,23 @@ xmex::Value int_to_str_v(const xmex::Value* v) {
 }  // extern "C"
 
 #endif  // !_WIN32
+
+// ====== 动态库 FFI 适配器(2026-10 增补) ======
+// kv.ffi(path) 加载 .dll/.so;返回带 symbols/describe/call/unload 方法的实例。
+// kv.ffi_list() 列出所有已加载的动态库。详见 runtime/ffi.h。
+//
+// ⚠️ 刻意放在 #ifndef _WIN32 之外 —— FFI 是**跨平台**的,加载 Windows DLL
+// 正是它的主要用途。放进 Linux-only 段会让 Windows 上链接不到
+// kv_ffi_v(报 undefined reference)。它依赖的 ffi.cpp / ffi_api.cpp 也是
+// 跨平台编译的。
+
+extern "C" {
+
+xmex::Value kv_ffi_v(const xmex::Value* path) {
+    return kv_ffi(path);
+}
+xmex::Value kv_ffi_list_v() {
+    return kv_ffi_list();
+}
+
+}  // extern "C"

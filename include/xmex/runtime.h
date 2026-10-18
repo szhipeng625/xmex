@@ -641,6 +641,23 @@ xmex::Value kv_reconcile_once();          // 手动一轮,返回详细报告
 xmex::Value kv_unskip(const xmex::Value *node_id);
 xmex::Value kv_failures(const xmex::Value *node_id);
 
+// ---- 动态库 FFI(2026-10 增补) ----
+// kv.ffi(path) 在本进程内加载 .dll/.so,返回带 methods 的实例:
+//   lib.symbols()          列出库里可调用的函数
+//   lib.describe("init")   看某个函数的签名(参数类型与返回类型)
+//   lib.call("init", [..])  调用
+//   lib.unload()            卸载
+// kv.ffi_list() 列出所有已加载的动态库。
+//
+// 与 kv.add() 的分工:kv.add 纳管一个**进程**,kv.ffi 在**本进程内**
+// 加载一个**动态库**。远程动态库要走「远程进程 + agent」,由 kv.add 纳管。
+//
+// 动态库需导出描述符 xmex_ffi_describe(char*, int64) 返回 JSON,
+// 以及按统一调用约定导出的函数 int64_t fn(int64_t*, int64_t, int64_t*)。
+// 详见 runtime/ffi.h 与 docs/ffi-design.md。
+xmex::Value kv_ffi(const xmex::Value *path);
+xmex::Value kv_ffi_list();
+
 // ---- 副本组(2026-10 增补) ----
 // 声明「这一组要几个副本」;成员不健康时调谐循环自动补足到期望副本数。
 // 参照 adviskv ReplicaGroup 设计。

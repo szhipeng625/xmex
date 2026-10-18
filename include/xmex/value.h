@@ -7,20 +7,11 @@
 #include <cstdint>
 #include <cstddef>
 
-namespace xmex {
+// tag 枚举在独立头里,理由见该文件顶部说明。
+// 这里 include 它而不是重复定义,保证两处永远一致。
+#include "xmex/value_tags.h"
 
-enum Tag : int32_t {
-  kNull     = 0,
-  kBool     = 1,
-  kInt      = 2,
-  kFloat    = 3,
-  kStr      = 4,
-  kList     = 5,
-  kDict     = 6,
-  kTuple    = 7,
-  kFunc     = 8,
-  kInstance = 9,
-};
+namespace xmex {
 
 struct Str;
 struct List;

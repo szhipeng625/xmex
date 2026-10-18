@@ -66,6 +66,15 @@ set(XMEX_RUNTIME_SOURCES
   runtime/concurrency.cpp
   runtime/object.cpp
   runtime/trace.cpp
+  # 动态库 FFI:加载本机 .dll/.so 并按描述符调用其函数。
+  # **刻意跨平台** —— 加载 Windows DLL 正是它的主要用途,放进
+  # if(NOT WIN32) 就等于把这个功能在 Windows 上阉掉。
+  # ffi.cpp 只依赖 platform.h 里的 XMEX_DLOPEN/DLSYM 抽象(Windows 是
+  # LoadLibraryA/GetProcAddress,Linux 是 dlopen/dlsym),没有 POSIX 专有依赖。
+  runtime/ffi.cpp
+  # ffi_api.cpp 提供 kv.ffi()/kv.ffi_list() 与实例方法注册。
+  # 同样跨平台:它只依赖运行时自身的 Value/Dict/List API。
+  runtime/ffi_api.cpp
   # distributed_adapter.cpp 是纯适配层：cluster/kv 段带 _WIN32 守卫（依赖只在
   # Linux 构建的 cluster_api / kv_admin_api.cpp）。自研 raft 已于 2026-10 移除，
   # 理由与后续方案见 docs/raft-removal.md。
@@ -197,6 +206,53 @@ if(NOT WIN32)
   target_link_libraries(reconcile_test PRIVATE pthread)
   add_test(NAME reconcile_test COMMAND reconcile_test)
 endif()
+
+# 动态库 FFI 测试(2026-10 增补)。
+#
+# 测一个**真实的**动态库:先编出 ffi_test_dll(.dll/.so),再让 ffi_test
+# 加载它、读描述符、按类型调用。这样测的是真链路,不是桩。
+#
+# 跨平台:Windows 上编 .dll,Linux 上编 .so,产物名不同,测试里按平台猜。
+# 刻意不链 xmex_runtime —— ffi.cpp 只依赖 platform.h 的 dl 抽象。
+add_library(ffi_test_dll SHARED tests/ffi_test_dll.cpp)
+set_target_properties(ffi_test_dll PROPERTIES
+  PREFIX ""                       # Windows 上不要 lib 前缀
+  OUTPUT_NAME "ffi_test_dll")
+
+add_executable(ffi_test tests/ffi_test.cpp runtime/ffi.cpp)
+target_include_directories(ffi_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/runtime)
+target_link_libraries(ffi_test PRIVATE ffi_test_dll)
+
+# 测试 exe 与 dll 放同一个目录,测试里用相对路径找
+add_test(NAME ffi_test COMMAND ffi_test)
+set_tests_properties(ffi_test PROPERTIES
+  WORKING_DIRECTORY $<TARGET_FILE_DIR:ffi_test>)
+
+# FFI 的端到端演示:C++ 宿主 + PyLite 脚本实际加载动态库并调用。
+#
+# 这是唯一能验证「PyLite 源码 → 编译 → 链接 → 加载 DLL → 调用」整条链路的
+# 用例。ffi_test 只测 C++ 层的 ffi.cpp,测不到 irgen 的映射与 ABI 约定。
+add_executable(ffi_demo examples/ffi_main.cpp)
+target_include_directories(ffi_demo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+# 先把 .pys 编译成 .o,再和宿主一起链接
+set(FFI_DEMO_OBJ ${CMAKE_CURRENT_BINARY_DIR}/ffi_demo.o)
+add_custom_command(
+  OUTPUT ${FFI_DEMO_OBJ}
+  COMMAND xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/ffi_demo.pys
+          -o ${FFI_DEMO_OBJ} -I ffi_demo
+  DEPENDS xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/ffi_demo.pys
+  COMMENT "xmexc examples/ffi_demo.pys")
+add_custom_target(ffi_demo_obj DEPENDS ${FFI_DEMO_OBJ})
+
+add_dependencies(ffi_demo ffi_demo_obj)
+target_sources(ffi_demo PRIVATE ${FFI_DEMO_OBJ})
+target_link_libraries(ffi_demo PRIVATE xmex_runtime ffi_test_dll)
+
+add_test(NAME ffi_demo COMMAND ffi_demo)
+set_tests_properties(ffi_demo PROPERTIES
+  WORKING_DIRECTORY $<TARGET_FILE_DIR:ffi_demo>)
 
 add_executable(jit_spike tests/jit_spike.cpp)
 target_include_directories(jit_spike PRIVATE ${LLVM_INCLUDE_DIRS})

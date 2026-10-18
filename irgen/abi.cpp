@@ -1,6 +1,8 @@
 #include "abi.h"
 
-#include "xmex/value.h"  // xmex::kInt 等 tag 常量,保证与 C++ 侧同源
+#include "xmex/value_tags.h"  // 只要 tag 常量,不要 Value 结构体 ——
+// 引入 value.h 会让 xmex::Value 进入本命名空间,与裸 Value(llvm::Value)冲突。
+// 详见 include/xmex/value_tags.h 顶部的说明。
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Constants.h"

@@ -37,10 +37,10 @@ std::unique_ptr<TargetMachine> makeTargetMachine(const Triple &TT, std::string *
   TargetOptions opt;
   // PIC 是 MinGW 的默认约定;显式给出来避免和 g++ 链接时出现重定位问题
   auto relocModel = std::optional<Reloc::Model>(Reloc::PIC_);
-  // createTargetMachine 在 LLVM 22 收的是 Triple 而不是 StringRef 了,
-  // 传 TT.getTriple()(std::string)会编译失败
+  // LLVM 22 的 createTargetMachine 第一个参数收的是 Triple 而不是 StringRef,
+  // 传 TT.str()(std::string)会编译失败 —— 要传 Triple 本身。
   auto TM = std::unique_ptr<TargetMachine>(T->createTargetMachine(
-      TT.str(), /*CPU=*/"generic", /*Features=*/"", opt, relocModel,
+      TT, /*CPU=*/"generic", /*Features=*/"", opt, relocModel,
       std::nullopt, CodeGenOptLevel::Default));
   if (!TM && error) *error = "无法为目标平台创建 TargetMachine";
   return TM;
@@ -93,7 +93,7 @@ bool emitObjectFile(Module &M, const std::string &outPath, std::string *error) {
   auto TM = makeTargetMachine(TT, error);
   if (!TM) return false;
 
-  M.setTargetTriple(TT.str());
+  M.setTargetTriple(TT);   // LLVM 22 收 Triple 而非 std::string
   M.setDataLayout(TM->createDataLayout());
 
   runOptimizationPipeline(M, *TM);
@@ -125,7 +125,7 @@ bool emitIRText(Module &M, const std::string &outPath, std::string *error) {
   auto TM = makeTargetMachine(TT, error);
   if (!TM) return false;
 
-  M.setTargetTriple(TT.str());
+  M.setTargetTriple(TT);   // LLVM 22 收 Triple 而非 std::string
   M.setDataLayout(TM->createDataLayout());
 
   std::error_code ec;
