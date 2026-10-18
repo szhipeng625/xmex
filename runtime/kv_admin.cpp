@@ -28,6 +28,238 @@ static const char* state_str(KvNodeState s) {
     return "unknown";
 }
 
+// ============================================================================
+// 容器节点支持(2026-10 增补)
+//
+// 容器与本机进程的生命周期原语完全不同,所以这里是一套独立实现,
+// 不是把进程那套套个壳:
+//
+//   拉起  fork+execv        →  docker run -d
+//   判活  waitpid(WNOHANG)   →  docker inspect --format {{.State.Running}}
+//   暂停  SIGSTOP            →  docker pause
+//   崩溃  kill(pid,SIGKILL)  →  docker kill
+//   限额  (未实现)           →  docker run --cpus --memory
+//
+// 为什么不能套用进程那套:容器里的进程宿主机 kill 不到。拿到容器 init 的
+// pid 也没用 —— 那是容器命名空间里的 pid,宿主机上 SIGKILL 它要么无效
+// 要么误杀同名进程。而 `docker pause` 冻结整个容器,`docker kill` 让它按
+// Docker 语义终止。用错手段会得到误导性的结论(比如 SIGSTOP 后容器照常
+// 服务,看着像"注入失败",其实是信号发错了地方)。
+// ============================================================================
+
+namespace {
+
+// 执行一条 docker 命令,把 stdout 收进 out,返回退出码。
+// 不用 shell:true,所以命令串里不能有管道/重定向 —— 需要的话用
+// sh -c 包一层(见 container_logs)。
+int run_docker(const std::string& cmd, std::string* out) {
+    std::string full = cmd + " 2>/dev/null";
+    FILE* f = popen(full.c_str(), "r");
+    if (!f) return -1;
+    std::string buf;
+    char chunk[4096];
+    while (fgets(chunk, (int)sizeof(chunk), f)) buf += chunk;
+    int rc = pclose(f);
+    if (out) *out = buf;
+    // pclose 返回的是 wait 状态,取退出码
+    if (rc == -1) return -1;
+    if ((rc & 0x7f) != 0) return 128 + (rc & 0x7f);
+    return (rc >> 8) & 0xff;
+}
+
+std::string trim(const std::string& s) {
+    size_t a = s.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos) return "";
+    size_t b = s.find_last_not_of(" \t\r\n");
+    return s.substr(a, b - a + 1);
+}
+
+// 容器 ID 合法性:只放行十六进制串,防注入。
+// docker 命令虽是 popen(走 shell),但 node_id 来自用户输入,
+// 拼进命令行前必须挡住引号/分号这类字符。
+bool valid_container_id(const std::string& id) {
+    if (id.empty() || id.size() > 64) return false;
+    for (char c : id) {
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+    }
+    return true;
+}
+
+// 校验资源限制串(如 "0.5" / "256m")。只放行数字与量纲后缀,
+// 因为它同样要拼进 shell 命令行。
+bool valid_limit(const std::string& s) {
+    if (s.empty()) return true;   // 空 = 不限
+    std::string body = s;
+    char last = body.back();
+    if (last == 'm' || last == 'g' || last == 'k' || last == 'M' || last == 'G') {
+        body.pop_back();
+    }
+    if (body.empty()) return false;
+    for (char c : body) {
+        if (!((c >= '0' && c <= '9') || c == '.')) return false;
+    }
+    return true;
+}
+
+}  // namespace
+
+bool KvAdmin::container_add(const std::string& node_id,
+                            const std::string& image,
+                            const std::string& command,
+                            const std::string& cpus,
+                            const std::string& memory,
+                            std::string& error) {
+    if (image.empty()) { error = "container_add needs an image"; return false; }
+    if (!valid_limit(cpus)) { error = "invalid cpus limit: " + cpus; return false; }
+    if (!valid_limit(memory)) { error = "invalid memory limit: " + memory; return false; }
+
+    KvNode node;
+    node.node_id = node_id;
+    node.container_image = image;
+    node.container_cmd = command;
+    node.container_cpus = cpus;
+    node.container_memory = memory;
+    node.desired = NodeDesired::PRESENT;
+    node.observed = NodeObserved::ABSENT;
+    node.state = KvNodeState::IDLE;
+    node.pid = -1;   // 容器节点没有本机 pid
+
+    // 先注册再 docker run:命令失败也要留节点,调谐会按 desired 重试
+    {
+        std::lock_guard<std::mutex> lk(mutex_);
+        nodes_[node_id] = node;
+    }
+
+    // docker run -d --name <node_id> [限额] <image> <command>
+    // ⚠️ --name 用 node_id 而不是随机名:调谐重启时能按名字找到旧容器先删,
+    // 否则 docker run 会因重名失败。
+    std::string cmd = "docker run -d --name " + node_id;
+    if (!cpus.empty())    cmd += " --cpus " + cpus;
+    if (!memory.empty()) cmd += " --memory " + memory;
+    cmd += " " + image;
+    if (!command.empty()) cmd += " " + command;
+
+    std::string out;
+    int rc = run_docker(cmd, &out);
+    if (rc != 0) {
+        error = "docker run failed (exit " + std::to_string(rc) + "): " + trim(out);
+        std::lock_guard<std::mutex> lk(mutex_);
+        nodes_[node_id].last_error = error;
+        return false;
+    }
+
+    std::string cid = trim(out);
+    if (cid.empty()) cid = node_id;   // --name 之后可用名字代替 ID
+
+    {
+        std::lock_guard<std::mutex> lk(mutex_);
+        KvNode& n = nodes_[node_id];
+        n.container_id = cid;
+        n.state = KvNodeState::RUNNING;
+        n.observed = NodeObserved::ALIVE;
+        n.container_status = "running";
+        n.started_at_ms = now_ms();
+        n.last_active_ms = now_ms();
+        n.last_update_ms = now_ms();
+        n.last_error.clear();
+        persist_node(n);
+    }
+    std::cout << "[kv_container] started " << node_id << " id=" << cid << std::endl;
+    return true;
+}
+
+bool KvAdmin::container_pause(const std::string& node_id, std::string& error) {
+    std::lock_guard<std::mutex> lk(mutex_);
+    auto it = nodes_.find(node_id);
+    if (it == nodes_.end()) { error = "node not found: " + node_id; return false; }
+    std::string cid = it->second.container_id;
+    if (cid.empty()) { error = "not a container node: " + node_id; return false; }
+    if (!valid_container_id(cid) && cid != node_id) {
+        error = "refusing suspicious container id"; return false;
+    }
+
+    std::string out;
+    // docker pause 冻结整个容器的所有进程 —— 这才是"服务不可用"的模拟
+    if (run_docker("docker pause " + cid, &out) != 0) {
+        error = "docker pause failed: " + trim(out);
+        return false;
+    }
+    it->second.state = KvNodeState::SLEEPING;
+    it->second.observed = NodeObserved::SUSPENDED;
+    it->second.container_status = "paused";
+    persist_node(it->second);
+    std::cout << "[kv_container] paused " << node_id << std::endl;
+    return true;
+}
+
+bool KvAdmin::container_unpause(const std::string& node_id, std::string& error) {
+    std::lock_guard<std::mutex> lk(mutex_);
+    auto it = nodes_.find(node_id);
+    if (it == nodes_.end()) { error = "node not found: " + node_id; return false; }
+    std::string cid = it->second.container_id;
+    if (cid.empty()) { error = "not a container node: " + node_id; return false; }
+
+    std::string out;
+    if (run_docker("docker unpause " + cid, &out) != 0) {
+        error = "docker unpause failed: " + trim(out);
+        return false;
+    }
+    it->second.state = KvNodeState::RUNNING;
+    it->second.observed = NodeObserved::ALIVE;
+    it->second.container_status = "running";
+    it->second.last_active_ms = now_ms();
+    persist_node(it->second);
+    std::cout << "[kv_container] unpaused " << node_id << std::endl;
+    return true;
+}
+
+bool KvAdmin::container_crash(const std::string& node_id, std::string& error) {
+    std::lock_guard<std::mutex> lk(mutex_);
+    auto it = nodes_.find(node_id);
+    if (it == nodes_.find(node_id) && it == nodes_.end()) {
+        error = "node not found: " + node_id; return false;
+    }
+    std::string cid = it->second.container_id;
+    if (cid.empty()) { error = "not a container node: " + node_id; return false; }
+
+    std::string out;
+    // docker kill(不加 -s)默认 SIGKILL,与"进程被 OOM killer 干掉"等价,
+    // 比 docker stop(先 SIGTERM 后宽限期)更适合测崩溃恢复。
+    if (run_docker("docker kill " + cid, &out) != 0) {
+        error = "docker kill failed: " + trim(out);
+        return false;
+    }
+    // kill 之后容器进程已死,但调谐要能观察到"不在跑了"才会重启。
+    // 这里主动把 observed 标成 CRASHED,不用等下一轮探测。
+    it->second.observed = NodeObserved::CRASHED;
+    it->second.container_status = "exited";
+    it->second.last_update_ms = now_ms();
+    persist_node(it->second);
+    std::cout << "[kv_container] killed " << node_id << std::endl;
+    return true;
+}
+
+bool KvAdmin::container_logs(const std::string& node_id, std::string& out,
+                             std::string& error) {
+    std::string cid;
+    {
+        std::lock_guard<std::mutex> lk(mutex_);
+        auto it = nodes_.find(node_id);
+        if (it == nodes_.end()) { error = "node not found: " + node_id; return false; }
+        cid = it->second.container_id;
+        if (cid.empty()) { error = "not a container node: " + node_id; return false; }
+    }
+    std::string logs;
+    // logs 会往 stderr 写部分输出,走 sh -c 把两个流合并
+    int rc = run_docker("sh -c 'docker logs " + cid + " 2>&1'", &logs);
+    if (rc != 0) {
+        error = "docker logs failed (exit " + std::to_string(rc) + ")";
+        return false;
+    }
+    out = logs;
+    return true;
+}
+
 const char* desired_str(NodeDesired d) {
     switch (d) {
         case NodeDesired::PRESENT: return "present";
@@ -137,6 +369,43 @@ bool KvAdmin::process_alive(int64_t pid) {
 // ---- 声明式：探测与调谐 ----
 
 NodeObserved KvAdmin::probe_locked(KvNode& node) {
+    // 容器节点:没有本机 pid,判活要走 docker inspect。
+    // ⚠️ 这条必须在 pid 检查**之前** —— 容器节点的 pid 恒为 -1,
+    // 落到下面的逻辑会被判成 ABSENT,调谐就会去 fork+exec 一个空路径,
+    // 结果是永远修不好。
+    if (!node.container_id.empty()) {
+        std::string cid = node.container_id;
+        std::string out;
+        // docker inspect 对不存在的容器返回非 0,这里当作"容器没了"
+        if (run_docker("docker inspect --format {{.State.Status}} " + cid, &out) != 0) {
+            node.container_status = "gone";
+            node.observed = (node.desired == NodeDesired::PRESENT)
+                                ? NodeObserved::CRASHED
+                                : NodeObserved::ABSENT;
+            node.last_update_ms = now_ms();
+            return node.observed;
+        }
+        std::string status = trim(out);
+        node.container_status = status;
+        if (status == "running") {
+            node.observed = (node.state == KvNodeState::SLEEPING)
+                                ? NodeObserved::SUSPENDED
+                                : NodeObserved::ALIVE;
+        } else if (status == "paused") {
+            // docker pause 冻结的是整个容器 —— 这正是"服务不可用"的模拟。
+            // 必须报 SUSPENDED 而不是 CRASHED,否则调谐会把它重启掉,
+            // 故障注入的现场就被打破了。
+            node.observed = NodeObserved::SUSPENDED;
+        } else {
+            // exited / dead / created …
+            node.observed = (node.state == KvNodeState::STOPPED)
+                                ? NodeObserved::ABSENT
+                                : NodeObserved::CRASHED;
+        }
+        node.last_update_ms = now_ms();
+        return node.observed;
+    }
+
     if (node.pid <= 0) {
         node.observed = NodeObserved::ABSENT;
         return node.observed;
@@ -281,6 +550,19 @@ bool KvAdmin::reconcile_one_locked(KvNode& node, int64_t now) {
     node.last_update_ms = now;
     node.last_error.clear();
     node.restart_count++;
+    // 容器节点:重启后是新容器,ID 变了。重新取一次,否则下一轮探测会
+    // 盯着已经不存在的旧 ID,判定成 CRASHED,陷入"反复重启"的死循环。
+    // 这里用节点名(我们 --name 指定的就是 node_id)去查,避开 ID 与名字
+    // 可能不一致的问题。
+    if (!node.container_image.empty()) {
+        std::string cid;
+        std::string out;
+        if (run_docker("docker inspect --format {{.Id}} " + node.node_id, &out) == 0) {
+            cid = trim(out);
+        }
+        node.container_id = cid.empty() ? node.node_id : cid;
+        node.container_status = "running";
+    }
     {
         std::lock_guard<std::mutex> rk(retry_mu_);
         retry_.erase(node.node_id);
@@ -336,6 +618,31 @@ bool KvAdmin::send_signal(int64_t pid, int sig, std::string& error) {
 }
 
 int64_t KvAdmin::spawn_process(const KvNode& node, std::string& error) {
+    // 容器节点:走 docker run,不 fork。
+    //
+    // 返回值是**伪造的 pid** —— 容器节点没有本机 pid,但调用方(调谐循环、
+    // build/add)需要一个非负数表示"起来了"。这里用 1 占位,真实身份在
+    // container_id 里。刻意不返回 0:那在调用方眼里等于"失败了"。
+    if (!node.container_image.empty()) {
+        // 重启前先清掉同名旧容器。--name 用的是 node_id,不删会撞名。
+        std::string old = "docker rm -f " + node.node_id;
+        std::string dummy;
+        run_docker(old, &dummy);   // 失败无所谓:可能本来就不存在
+
+        std::string cmd = "docker run -d --name " + node.node_id;
+        if (!node.container_cpus.empty())    cmd += " --cpus " + node.container_cpus;
+        if (!node.container_memory.empty()) cmd += " --memory " + node.container_memory;
+        cmd += " " + node.container_image;
+        if (!node.container_cmd.empty()) cmd += " " + node.container_cmd;
+
+        std::string out;
+        if (run_docker(cmd, &out) != 0) {
+            error = "docker run failed: " + trim(out);
+            return -1;
+        }
+        return 1;   // 占位 pid,见上方说明
+    }
+
     // 注入模式:交给测试的钩子,不真的 fork
     if (spawn_hook_) {
         int64_t pid = spawn_hook_(node, error);

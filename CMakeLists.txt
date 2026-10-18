@@ -210,6 +210,22 @@ if(NOT WIN32)
   add_test(NAME reconcile_test COMMAND reconcile_test)
 endif()
 
+# 容器节点测试(2026-10 增补)。
+#
+# 测的是**不需要 Docker daemon 的那部分**:参数校验、资源限额的命令注入
+# 防线、节点表一致性、类型混淆拒绝。真正跑容器的路径(pause/crash/重启)
+# 要有 Docker 环境才有意义,留给 Linux CI。
+#
+# 只在 Linux 编:容器节点走 popen 调 docker,依赖 POSIX 那一套。
+if(NOT WIN32)
+  add_executable(container_test tests/container_test.cpp
+                 runtime/kv_admin.cpp runtime/lsm_client.cpp)
+  target_include_directories(container_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(container_test PRIVATE pthread)
+  add_test(NAME container_test COMMAND container_test)
+endif()
+
 # 动态库 FFI 测试(2026-10 增补)。
 #
 # 测一个**真实的**动态库:先编出 ffi_test_dll(.dll/.so),再让 ffi_test

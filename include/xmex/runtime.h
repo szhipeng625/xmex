@@ -635,6 +635,27 @@ xmex::Value kv_iter_destroy(const xmex::Value *it);
 // 不启动循环时行为与从前完全一致(命令式),调谐是可选增强。
 // 详见 docs/distributed-reconcile-design.md
 xmex::Value kv_reconcile_start(const xmex::Value *interval_ms);
+
+// ---- 容器节点(2026-10 增补)----
+// 与 kv.add 平行但作用于 Docker 容器。刻意不并入 kv.add 的参数:
+// 一个纳管本机进程(fork/exec + SIGSTOP/SIGKILL),一个跑容器
+// (docker run + docker pause/kill)—— 原语全不一样,硬合会让两边都变脏。
+//
+//   kv.container_add(node_id, image, command, cpus, memory)
+//   kv.container_pause(node_id)      冻结容器,模拟服务不可用
+//   kv.container_unpause(node_id)    解冻
+//   kv.container_crash(node_id)      SIGKILL 掉,调谐会重新拉起
+//   kv.container_logs(node_id)       容器日志
+//
+// cpus/memory 传空串表示不限,例:"0.5" / "256m"。
+// 需要 PATH 上有 docker CLI 且当前用户能访问 daemon(**Linux only**)。
+xmex::Value kv_container_add(const xmex::Value *node_id, const xmex::Value *image,
+                             const xmex::Value *command, const xmex::Value *cpus,
+                             const xmex::Value *memory);
+xmex::Value kv_container_pause(const xmex::Value *node_id);
+xmex::Value kv_container_unpause(const xmex::Value *node_id);
+xmex::Value kv_container_crash(const xmex::Value *node_id);
+xmex::Value kv_container_logs(const xmex::Value *node_id);
 xmex::Value kv_reconcile_stop();
 xmex::Value kv_reconcile_status();
 xmex::Value kv_reconcile_once();          // 手动一轮,返回详细报告

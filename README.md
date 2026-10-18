@@ -267,7 +267,41 @@ agent 启动时先加载 DLL 再进请求循环,加载失败以退出码 3 退�
 就会看到「进程没了」并重新拉起。`--ready-file` 让纳管方能判断「DLL 已就绪」
 而不只是「进程还活着」。
 
-### 7. 进程纳管与调谐(Linux)
+### 7. 测试 Docker 部署的服务(Linux)
+
+容器节点与 `kv.add` 平行,但作用于 Docker 容器。三种故障注入:
+
+```python
+# 拉起容器(可带资源限额),纳入节点表
+kv.container_add("mq-1", "rabbitmq:3-management", "rabbitmq-server", "0.5", "256m")
+kv.reconcile_start(2000)
+
+kv.container_crash("mq-1")     # docker kill → 调谐自动重新 run
+kv.container_pause("mq-1")     # docker pause → 冻结,模拟服务不可用
+kv.container_unpause("mq-1")   # 解冻
+kv.container_logs("mq-1")      # 容器日志
+kv.erase("mq-1")
+```
+
+| 手段 | 进程节点 | 容器节点 |
+|---|---|---|
+| 拉起 | `fork` + `execv` | `docker run -d` |
+| 判活 | `waitpid(WNOHANG)` | `docker inspect --format {{.State.Status}}` |
+| 暂停 | `SIGSTOP` | `docker pause` |
+| 崩溃 | `kill(pid, SIGKILL)` | `docker kill` |
+| 限额 | 未实现 | `--cpus` / `--memory` |
+
+**为什么不能用进程那套去操作容器**:容器里的进程宿主机 kill 不到。拿到容器
+init 的 pid 也没用——那是容器命名空间里的 pid,SIGKILL 它要么无效要么误杀同名
+进程。用错手段会得到误导性的结论(`SIGSTOP` 后容器照常服务,看着像"注入失败",
+其实是信号发错了地方)。
+
+`docker pause` 冻结容器时报 `observed=suspended` 而**不是** `crashed`——否则
+调谐会把它重启掉,故障注入的现场就被打破了。
+
+完整例子:[examples/container_test_demo.pys](examples/container_test_demo.pys)。
+
+### 8. 进程纳管与调谐(Linux)
 
 `kv.add` 纳管一个**可执行文件** —— 和 `kv.ffi` 加载动态库是两回事,别混用。
 
@@ -314,6 +348,9 @@ kv.group_status("shard-1")
 | `kv.ffi_isolated` 报 `worker crashed` | 这是**预期行为** —— DLL 崩了,只有子进程死,宿主活着 |
 | `kv.add` / `kv.group_*` 报未定义 | 这些是 **Linux only**,Windows 上没有(见「平台差异」) |
 | `kv.reconcile_*` 报未定义 | 同上,Linux only |
+| `kv.container_*` 报未定义 | Linux only,且需要 docker CLI 与 daemon 权限 |
+| `kv.container_pause` 报 `not a container node` | 该节点是用 `kv.add` 建的进程节点,不是容器 |
+| `kv.container_*` 报 `docker run failed` | 看错误里的 docker 原始输出,常见是镜像名错或 daemon 没起 |
 
 ## 目录结构
 
@@ -423,6 +460,10 @@ kv.group_status("shard-1")
 - `kv.add` / 调谐循环 / 副本组**仅 Linux**(实现在 `runtime/kv_admin.cpp`)
 - Redis 持久化仍存 `state` 而非 `desired` —— 进程重启会丢节点意图(已知待修)
 - 副本组只支持"补足期望副本数",不支持缩容时自动摘除多余成员
+- **容器节点只支持 `--cpus`/`--memory` 两种限额**,不支持 `--cpuset-cpus`
+  / `--network` / `--volumes` 等参数(传了会被忽略)
+- 容器节点需要 PATH 上有 docker CLI 且当前用户能访问 daemon;容器内进程
+  的日志要通过 `docker logs` 拿,拿不到宿主机的 stdout
 - `lsm_client` 名字叫 LSM,实际是手写的 Redis 协议客户端(历史命名债)
 
 完整的支持清单与语义细节见 [docs/language.md](docs/language.md)。

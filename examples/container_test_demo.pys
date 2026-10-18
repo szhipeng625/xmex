@@ -1,0 +1,55 @@
+# container_test_demo.pys -- Docker container node demo
+#
+# Shows the three fault-injection scenarios for a deployed service:
+#   1. crash      -- docker kill, reconcile restarts it
+#   2. resource   -- run with --cpus/--memory caps
+#   3. hang       -- docker pause/unpause (service unavailable)
+#
+# Requires: docker CLI in PATH, access to the docker daemon, Linux.
+# The container module is Linux-only (it lives in kv_admin).
+
+print("=== 1. start a container with resource limits ===")
+
+# cpus=0.5, memory=256m. Empty string means unlimited.
+r = kv.container_add("mq-1", "rabbitmq:3-management", "rabbitmq-server", "0.5", "256m")
+print("add:", r)
+print("status:", kv.status("mq-1"))
+
+print("--- logs ---")
+print(kv.container_logs("mq-1"))
+
+# Reconcile loop: watches the container, restarts it when it dies.
+kv.reconcile_start(2000)
+
+print("=== 2. crash injection ===")
+
+# docker kill -> SIGKILL the container.
+# Reconcile notices it is gone and runs docker run again.
+print("crash:", kv.container_crash("mq-1"))
+print("status right after:", kv.status("mq-1"))
+
+# Give the reconcile loop a moment to repair it.
+sleep_ms(3000)
+print("status after repair:", kv.status("mq-1"))
+
+print("=== 3. hang injection (pause/unpause) ===")
+
+# docker pause freezes the whole container -> service unavailable
+# but the process is still there. This models a lost/unresponsive node
+# better than a crash does.
+print("pause:", kv.container_pause("mq-1"))
+print("status while paused:", kv.status("mq-1"))
+
+# Paused is reported as observed=suspended, NOT crashed -- otherwise
+# reconcile would restart it and break the fault injection.
+print("waiting 1s, paused state must persist...")
+sleep_ms(1000)
+print("status still paused:", kv.status("mq-1"))
+
+print("unpause:", kv.container_unpause("mq-1"))
+print("status after unpause:", kv.status("mq-1"))
+
+print("=== 4. cleanup ===")
+kv.reconcile_stop()
+kv.erase("mq-1")
+print("done")

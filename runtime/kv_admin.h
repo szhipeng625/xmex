@@ -105,6 +105,23 @@ struct KvNode {
     int64_t started_at_ms;          // 启动时间
     int64_t last_active_ms;         // 最后活跃时间
     int64_t restart_count;          // 重启次数
+
+    // ---- 容器节点(2026-10 增补)----
+    //
+    // 非空时这个节点是**容器**,不是本机进程。区别很实在:
+    //   进程节点: fork/exec 拉起,SIGSTOP 注入暂停,kill(pid) 注入崩溃
+    //   容器节点: docker run 拉起,`docker pause` 注入暂停,`docker kill` 注入崩溃
+    //
+    // 为什么容器要单独一套:容器里的进程宿主机 kill 不到(SIGKILL 也只杀容器
+    // 的 init),暂停与崩溃得走 Docker 的 API。硬套进程那套会给出误导性的结果 ——
+    // 比如"暂停"后容器照常服务,看起来像注入失败。
+    std::string container_id;         // docker run 返回的容器 ID;空 = 进程节点
+    std::string container_image;      // 镜像名(重启时要重新 docker run)
+    std::string container_cmd;        // 容器内命令
+    std::string container_cpus;       // 资源限制,如 "0.5";空 = 不限
+    std::string container_memory;     // 资源限制,如 "256m";空 = 不限
+    // 容器节点没有 pid 可探测存活,用 docker inspect 查状态,记在这里
+    std::string container_status;     // running / exited / paused / ...
 };
 
 // ============================================================================
@@ -224,6 +241,33 @@ public:
                       const std::string& work_dir_prefix,
                       const std::string& addr_prefix,
                       std::string& error);
+
+    // ---- 容器节点(2026-10 增补)----
+    //
+    // 容器节点与进程节点的分野在**故障注入的手段**上:
+    //   暂停:  进程 SIGSTOP        / 容器 `docker pause`
+    //   崩溃:  kill(pid, SIGKILL) / 容器 `docker kill`
+    //   存活:  waitpid(WNOHANG)   / `docker inspect --format {{.State.Running}}`
+    //   限额:  rlimit(未实现)      / `--cpus` `--memory`
+    //
+    // 容器里的进程宿主机 kill 不到(即使拿到 pid),SIGKILL 也只终止容器的
+    // init 而不一定让服务停下,所以必须走 Docker API —— 硬套进程那套会给出
+    // 误导性的结果(比如"暂停"后容器照常服务,看着像注入失败)。
+    //
+    // 全部需要 Docker CLI 在 PATH 上,且当前用户有权限访问 docker daemon。
+    bool container_add(const std::string& node_id,
+                       const std::string& image,
+                       const std::string& command,
+                       const std::string& cpus,
+                       const std::string& memory,
+                       std::string& error);
+
+    bool container_pause(const std::string& node_id, std::string& error);
+    bool container_unpause(const std::string& node_id, std::string& error);
+    // 崩溃注入:docker kill,容器进程被 SIGKILL。调谐会把它重新 run 起来。
+    bool container_crash(const std::string& node_id, std::string& error);
+    // 容器日志
+    bool container_logs(const std::string& node_id, std::string& out, std::string& error);
     // 把一个已纳管的节点纳入某组(节点本身不重启)
     bool group_add_member(const std::string& group_id,
                           const std::string& node_id,

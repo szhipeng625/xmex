@@ -279,6 +279,26 @@ xmex::Value kv_group_destroy_v(const xmex::Value* group_id) {
     return kv_group_destroy(group_id);
 }
 
+// ====== 容器节点适配器(2026-10 增补)======
+// 依赖 kv_admin_api 的 kv_container_*,那也是 Linux-only,所以放在这一段内。
+xmex::Value kv_container_add_v(const xmex::Value* node_id, const xmex::Value* image,
+                               const xmex::Value* command, const xmex::Value* cpus,
+                               const xmex::Value* memory) {
+    return kv_container_add(node_id, image, command, cpus, memory);
+}
+xmex::Value kv_container_pause_v(const xmex::Value* node_id) {
+    return kv_container_pause(node_id);
+}
+xmex::Value kv_container_unpause_v(const xmex::Value* node_id) {
+    return kv_container_unpause(node_id);
+}
+xmex::Value kv_container_crash_v(const xmex::Value* node_id) {
+    return kv_container_crash(node_id);
+}
+xmex::Value kv_container_logs_v(const xmex::Value* node_id) {
+    return kv_container_logs(node_id);
+}
+
 // ====== 动态库 FFI 适配器(2026-10 增补) ======
 // 见文件末尾的跨平台实现 —— 它不能放在 Linux-only 段里。
 

@@ -563,6 +563,12 @@ static const char *builtinModulePrefix(const std::string &mod, const std::string
     if (fn == "iter_live") return "kv_iter_live_v";
     // 声明式调谐方法(2026-10 增补):后台把 observed 拉回 desired,
     // 副本组补足到期望副本数。设计见 docs/distributed-reconcile-design.md
+    // 容器节点(2026-10 增补):Docker 容器纳管与故障注入
+    if (fn == "container_add") return "kv_container_add_v";
+    if (fn == "container_pause") return "kv_container_pause_v";
+    if (fn == "container_unpause") return "kv_container_unpause_v";
+    if (fn == "container_crash") return "kv_container_crash_v";
+    if (fn == "container_logs") return "kv_container_logs_v";
     if (fn == "reconcile_start") return "kv_reconcile_start_v";
     if (fn == "reconcile_stop") return "kv_reconcile_stop_v";
     if (fn == "reconcile_status") return "kv_reconcile_status_v";

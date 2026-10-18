@@ -31,6 +31,15 @@ static std::string node_to_json(const KvNode& n) {
     json << "\"last_update_ms\":" << n.last_update_ms << ",";
     json << "\"last_error\":\"" << n.last_error << "\",";
     json << "\"restart_count\":" << n.restart_count;
+    // 容器字段(2026-10 增补):非空才输出,免得进程节点多出无意义的空串。
+    if (!n.container_id.empty()) {
+        json << ",";
+        json << "\"container_id\":\"" << n.container_id << "\",";
+        json << "\"container_image\":\"" << n.container_image << "\",";
+        json << "\"container_status\":\"" << n.container_status << "\",";
+        json << "\"container_cpus\":\"" << n.container_cpus << "\",";
+        json << "\"container_memory\":\"" << n.container_memory << "\"";
+    }
     json << "}";
     return json.str();
 }
@@ -673,6 +682,102 @@ xmex::Value kv_group_destroy(const xmex::Value* group_id) {
     json << "{\"ok\":" << (ok ? "true" : "false") << ",\"error\":\"" << error << "\"}";
     std::string s = json.str();
     return str_new(s.c_str(), s.size());
+}
+
+// ============================================================================
+// 容器节点的语言层接口(2026-10 增补)
+//
+// 这些是 kv.* 家族的新成员,与 kv.add / kv.sleep 平行但作用于容器。
+// 刻意不塞进 kv.add 的参数里 —— 一个是"纳管本机进程",一个是"跑容器",
+// 生命周期原语、重启方式、故障注入手段全都不一样,硬合会让两边都变脏。
+// ============================================================================
+
+// kv.container_add(node_id, image, command, cpus, memory)
+//   拉起一个容器并纳入节点表。cpus/memory 传空串表示不限。
+//   例: kv.container_add("mq", "rabbitmq:3-management", "rabbitmq-server", "0.5", "256m")
+xmex::Value kv_container_add(const xmex::Value* node_id, const xmex::Value* image,
+                             const xmex::Value* command, const xmex::Value* cpus,
+                             const xmex::Value* memory) {
+    auto s = [](const xmex::Value* v) -> std::string {
+        if (!v || v->tag != xmex::kStr) return "";
+        return std::string(str_data(v), str_size(v));
+    };
+    std::string id = s(node_id);
+    if (id.empty() || !image || image->tag != xmex::kStr) {
+        std::string e = "{\"ok\":false,\"error\":\"container_add needs (node_id, image)\"}";
+        return str_new(e.c_str(), e.size());
+    }
+    std::string error;
+    bool ok = KvAdmin::instance().container_add(id, s(image), s(command), s(cpus),
+                                                s(memory), error);
+    std::ostringstream json;
+    json << "{\"ok\":" << (ok ? "true" : "false");
+    json << ",\"node_id\":\"" << id << "\"";
+    if (!ok) json << ",\"error\":\"" << error << "\"";
+    json << "}";
+    std::string out = json.str();
+    return str_new(out.c_str(), out.size());
+}
+
+// kv.container_pause(node_id) —— 冻结容器,模拟服务不可用
+xmex::Value kv_container_pause(const xmex::Value* node_id) {
+    std::string node;
+    if (node_id && node_id->tag == xmex::kStr) {
+        node = std::string(str_data(node_id), str_size(node_id));
+    }
+    std::string error;
+    bool ok = KvAdmin::instance().container_pause(node, error);
+    std::ostringstream json;
+    json << "{\"ok\":" << (ok ? "true" : "false");
+    if (!ok) json << ",\"error\":\"" << error << "\"";
+    json << "}";
+    std::string out = json.str();
+    return str_new(out.c_str(), out.size());
+}
+
+xmex::Value kv_container_unpause(const xmex::Value* node_id) {
+    std::string node;
+    if (node_id && node_id->tag == xmex::kStr) {
+        node = std::string(str_data(node_id), str_size(node_id));
+    }
+    std::string error;
+    bool ok = KvAdmin::instance().container_unpause(node, error);
+    std::ostringstream json;
+    json << "{\"ok\":" << (ok ? "true" : "false");
+    if (!ok) json << ",\"error\":\"" << error << "\"";
+    json << "}";
+    std::string out = json.str();
+    return str_new(out.c_str(), out.size());
+}
+
+// kv.container_crash(node_id) —— SIGKILL 掉容器,调谐会把它重新拉起
+xmex::Value kv_container_crash(const xmex::Value* node_id) {
+    std::string node;
+    if (node_id && node_id->tag == xmex::kStr) {
+        node = std::string(str_data(node_id), str_size(node_id));
+    }
+    std::string error;
+    bool ok = KvAdmin::instance().container_crash(node, error);
+    std::ostringstream json;
+    json << "{\"ok\":" << (ok ? "true" : "false");
+    if (!ok) json << ",\"error\":\"" << error << "\"";
+    json << "}";
+    std::string out = json.str();
+    return str_new(out.c_str(), out.size());
+}
+
+// kv.container_logs(node_id) → 容器日志文本
+xmex::Value kv_container_logs(const xmex::Value* node_id) {
+    std::string node;
+    if (node_id && node_id->tag == xmex::kStr) {
+        node = std::string(str_data(node_id), str_size(node_id));
+    }
+    std::string out, error;
+    if (!KvAdmin::instance().container_logs(node, out, error)) {
+        std::string e = "{\"ok\":false,\"error\":\"" + error + "\"}";
+        return str_new(e.c_str(), e.size());
+    }
+    return str_new(out.c_str(), out.size());
 }
 
 }  // extern "C"
