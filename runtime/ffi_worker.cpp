@@ -97,9 +97,29 @@ std::string json_escape(const std::string& s) {
 
 }  // namespace
 
+// ready_file 非空时,DLL 加载成功后往该文件写一行 "ready"。
+//
+// 为什么需要它:agent 被 kv.add 纳管后,调谐循环只看"pid 还活着吗",
+// 那区分不了「DLL 已就绪」与「进程活着但在空转」。纳管方可以轮询这个
+// 文件(或发 ping),拿到就绪信号才算节点健康。
+//
+// ⚠️ 写完要真的关闭文件(不是只 fclose 缓冲区)—— 纳管方可能在下一轮
+// 调谐(默认 1 秒)就读它,数据必须在文件落盘。
+static void write_ready_file(const char* path) {
+    if (!path || !*path) return;
+    FILE* f = std::fopen(path, "wb");
+    if (!f) return;
+    const char* msg = "ready\n";
+    std::fwrite(msg, 1, std::strlen(msg), f);
+    std::fflush(f);
+    std::fclose(f);
+}
+
 // agent 主循环。stdin 读请求,stdout 写响应。
 // 返回 0 正常退出(读到 EOF),非 0 表示出错。
-extern "C" int ffi_worker_main(const char* lib_path) {
+//   2 = 没给库路径
+//   3 = DLL 加载失败(纳管方会看到这个退出码并重启)
+extern "C" int ffi_worker_main(const char* lib_path, const char* ready_file) {
     if (!lib_path || !*lib_path) {
         std::fprintf(stderr, "ffi_worker: no library path\n");
         return 2;
@@ -110,15 +130,18 @@ extern "C" int ffi_worker_main(const char* lib_path) {
     ffi_load(lib_path, (int64_t)strlen(lib_path),
              handle, (int64_t)sizeof(handle), err, (int64_t)sizeof(err));
     if (!handle[0]) {
-        // 加载失败:把错误作为一条响应发回去,宿主据此报错
+        // 加载失败:把错误作为一条响应发回去,宿主据此报错。
+        // 同时**不**写 ready 文件 —— 纳管方据此知道没就绪。
         std::string resp = "{\"ok\":false,\"error\":\"";
         resp += json_escape(err);
-        resp += "\"}";
-        resp += "\n";
+        resp += "\"}\n";
         std::fwrite(resp.data(), 1, resp.size(), stdout);
         std::fflush(stdout);
+        std::fprintf(stderr, "ffi_worker: load failed: %s\n", err);
         return 3;
     }
+
+    write_ready_file(ready_file);
 
     // 告诉宿主加载成功了(第一行响应)
     {
@@ -153,7 +176,17 @@ extern "C" int ffi_worker_main(const char* lib_path) {
         std::string op = extract_str(line, "op");
         std::string resp;
 
-        if (op == "symbols") {
+        if (op == "ping") {
+            // 探活:进程在、DLL 已加载。
+            //
+            // 这个操作是给 kv.add 纳管场景用的 —— 纳管后调谐循环只看
+            // 「pid 还活着吗」,那不足以区分「服务就绪」与「进程空转」。
+            // 纳管方可以定期发 ping,拿到 {"ok":true} 才认为节点健康。
+            //
+            // DLL 是启动时就加载的(见上方 ffi_load),所以能走到这里
+            // 就说明库已经就绪;真正的失败在启动阶段就 return 3 了。
+            resp = "{\"ok\":true,\"ready\":true}";
+        } else if (op == "symbols") {
             std::vector<char> sb(64 * 1024);
             ffi_symbols(handle, (int64_t)strlen(handle), sb.data(), (int64_t)sb.size());
             resp = "{\"ok\":true,\"symbols\":";

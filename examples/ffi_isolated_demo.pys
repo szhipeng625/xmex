@@ -35,6 +35,18 @@ print("isolated dll_crash:", r)
 r = lib.call("dll_add", [1, 2])
 print("after crash:", r)
 
+print("--- timeout test ---")
+
+# A hanging DLL must not block the host forever.
+# The host kills the worker after a timeout (5s by default).
+lib2 = kv.ffi_isolated("./ffi_test_dll.dll")
+r = lib2.call("dll_hang", [])
+print("isolated dll_hang:", r)
+
+# host is still alive after the timeout
+r = lib2.call("dll_add", [7, 8])
+print("after timeout:", r)
+
 print("=== host is still alive, demo done ===")
 
 # ---- in-process mode for comparison ----

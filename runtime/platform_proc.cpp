@@ -196,6 +196,23 @@ long xmex_proc_pid(xmex_proc_t proc) {
     return (long)GetProcessId((HANDLE)proc);
 }
 
+int xmex_proc_kill(xmex_proc_t proc) {
+    if (proc == XMEX_PROC_INVALID) return 0;
+    HANDLE h = (HANDLE)proc;
+    DWORD code = 0;
+    // 已经退出了就不用杀
+    if (GetExitCodeProcess(h, &code) && code != STILL_ACTIVE) {
+        CloseHandle(h);
+        return 0;
+    }
+    // 退出码 1 = 强杀。Windows 没有 SIGKILL 的"不给清理机会"语义,
+    // TerminateProcess 就是硬杀 —— 与 POSIX 的 SIGKILL 对齐。
+    BOOL ok = TerminateProcess(h, 1);
+    WaitForSingleObject(h, 2000);
+    CloseHandle(h);
+    return ok ? 1 : 0;
+}
+
 void xmex_pipe_close(xmex_pipe_t p) {
     if (p == XMEX_PIPE_INVALID) return;
     HANDLE h = (HANDLE)p;
@@ -215,6 +232,36 @@ long xmex_pipe_read(xmex_pipe_t p, void* buf, unsigned long n) {
         return -1;
     }
     return (long)got;
+}
+
+int xmex_pipe_read_byte_timeout(xmex_pipe_t p, char* out, unsigned long timeout_ms) {
+    if (p == XMEX_PIPE_INVALID) return -2;
+    HANDLE h = (HANDLE)p;
+
+    // PeekNamedPipe 只能看"有没有数据",不能等。要等就得轮询 ——
+    // 管道不支持 select/epoll 的等待语义,轮询间隔取 10ms 兼顾
+    // 响应速度与 CPU 开销。
+    const unsigned long kPollMs = 10;
+    unsigned long waited = 0;
+    while (true) {
+        DWORD avail = 0;
+        if (!PeekNamedPipe(h, nullptr, 0, nullptr, &avail, nullptr)) {
+            // 管道坏了或已关闭 —— 交给下面的 ReadFile 区分 EOF 与错误
+            DWORD got = 0;
+            if (!ReadFile(h, out, 1, &got, nullptr)) {
+                return (got == 0) ? -1 : -2;
+            }
+            return 1;
+        }
+        if (avail > 0) {
+            DWORD got = 0;
+            if (!ReadFile(h, out, 1, &got, nullptr)) return -2;
+            return 1;
+        }
+        if (waited >= timeout_ms) return 0;   // 超时
+        Sleep(kPollMs);
+        waited += kPollMs;
+    }
 }
 
 long xmex_pipe_write(xmex_pipe_t p, const void* buf, unsigned long n) {
@@ -290,6 +337,22 @@ long xmex_proc_pid(xmex_proc_t proc) {
     return (long)proc;
 }
 
+int xmex_proc_kill(xmex_proc_t proc) {
+    if (proc == XMEX_PROC_INVALID) return 0;
+    pid_t pid = (pid_t)proc;
+    // 已经退出了(waitpid 立刻返回 pid)就不用杀
+    int status = 0;
+    pid_t r = waitpid(pid, &status, WNOHANG);
+    if (r == pid) return 0;         // 已经退出并回收
+    if (r < 0) return 0;            // 没这个子进程,视为已退出
+
+    // SIGKILL = 不给清理机会,与 Windows 的 TerminateProcess 对齐。
+    // 卡在死循环里的 agent 根本没在处理 SIGTERM,所以必须用 KILL。
+    if (kill(pid, SIGKILL) != 0) return 0;
+    waitpid(pid, &status, 0);
+    return 1;
+}
+
 void xmex_pipe_close(xmex_pipe_t p) {
     if (p == XMEX_PIPE_INVALID) return;
     close(p);
@@ -304,6 +367,33 @@ long xmex_pipe_read(xmex_pipe_t p, void* buf, unsigned long n) {
         return -1;
     }
     return (long)got;
+}
+
+int xmex_pipe_read_byte_timeout(xmex_pipe_t p, char* out, unsigned long timeout_ms) {
+    if (p == XMEX_PIPE_INVALID) return -2;
+    for (;;) {
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(p, &rfds);
+        struct timeval tv;
+        tv.tv_sec = (time_t)(timeout_ms / 1000);
+        tv.tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000);
+
+        int rc = select(p + 1, &rfds, nullptr, nullptr, &tv);
+        if (rc < 0) {
+            if (errno == EINTR) continue;
+            return -2;
+        }
+        if (rc == 0) return 0;      // 超时
+
+        ssize_t got = read(p, out, 1);
+        if (got < 0) {
+            if (errno == EINTR) continue;
+            return -2;
+        }
+        if (got == 0) return -1;    // EOF
+        return 1;
+    }
 }
 
 long xmex_pipe_write(xmex_pipe_t p, const void* buf, unsigned long n) {

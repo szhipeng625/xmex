@@ -111,6 +111,13 @@ extern "C" int xmex_spawn(const char* exe_path, const char* const* argv, int arg
 // 等待子进程结束。返回退出码;若是被信号杀死,返回 128+signal。
 extern "C" int xmex_proc_wait(xmex_proc_t proc);
 
+// 强制终止子进程(不给它清理机会),然后回收。
+//
+// 什么时候需要:子进程里的 DLL 若死循环,关管道它也不退出 —— 它根本没在
+// 读。此时必须硬杀,否则留下一个永远空转的僵尸进程,占着 CPU 与内存。
+// 返回 1 表示杀掉了,0 表示已经退出了(不用杀)。
+extern "C" int xmex_proc_kill(xmex_proc_t proc);
+
 // 取子进程 pid(用于日志与诊断)。
 extern "C" long xmex_proc_pid(xmex_proc_t proc);
 
@@ -120,6 +127,15 @@ extern "C" void xmex_pipe_close(xmex_pipe_t p);
 // 从管道读 n 字节。返回实际读到的字节数;0 表示 EOF(对端已关闭);
 // -1 表示错误。
 extern "C" long xmex_pipe_read(xmex_pipe_t p, void* buf, unsigned long n);
+
+// 从管道读**恰好一个字节**,最多等 timeout_ms 毫秒。
+// 返回 1 = 读到一字节(写入 *out);0 = 超时(什么都没等到);
+// -1 = EOF(对端关闭);-2 = 错误。
+//
+// 为什么需要它:子进程里的 DLL 若死循环,阻塞式读会让宿主**永久**卡住 ——
+// 没有超时就没有任何机会恢复。调用方拿到 0 后可以杀掉 worker 再报错。
+extern "C" int xmex_pipe_read_byte_timeout(xmex_pipe_t p, char* out,
+                                           unsigned long timeout_ms);
 
 // 往管道写 n 字节。返回实际写入的字节数;-1 表示错误。
 extern "C" long xmex_pipe_write(xmex_pipe_t p, const void* buf, unsigned long n);

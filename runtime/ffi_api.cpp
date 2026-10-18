@@ -147,8 +147,21 @@ static std::string agent_path() {
     return std::string("xmex_ffi_agent") + XMEX_EXE_EXT;
 }
 
+// 默认单次调用的超时。
+//
+// 为什么必须有:DLL 里一个死循环就能让宿主**永久**卡在读管道上。
+// 没有超时就没有任何机会恢复 —— 隔离模式只隔离了崩溃,隔离不了卡死。
+// 超时后杀掉 worker,把"卡死"也变成一个可观测的错误。
+#ifndef XMEX_FFI_TIMEOUT_MS
+  #define XMEX_FFI_TIMEOUT_MS 5000
+#endif
+
+// 超时被杀后记的退出码。刻意不等于任何真实的崩溃退出码(139/134/...),
+// 免得调用方把"卡死"误读成"崩了" —— 两者的处理策略不一样。
+#define XMEX_FFI_TIMEOUT_EXIT (-124)
+
 // 给子进程发一行请求并读一行响应。
-// 返回 false 表示子进程已死(管道 EOF)或出错。
+// 返回 false 表示子进程已死(管道 EOF)、超时或出错。
 static bool worker_request(IsolatedWorker& w, const std::string& req,
                            std::string& resp, std::string& error) {
     if (w.dead) {
@@ -163,16 +176,36 @@ static bool worker_request(IsolatedWorker& w, const std::string& req,
         return false;
     }
 
-    // 读一行响应
+    // 读一行响应,每字节都有超时上限(整个响应共用这个预算)
     std::string out;
     while (true) {
         char c;
-        long got = xmex_pipe_read(w.from_child, &c, 1);
-        if (got <= 0) {
+        int got = xmex_pipe_read_byte_timeout(w.from_child, &c, XMEX_FFI_TIMEOUT_MS);
+        if (got == 0) {
+            // 超时:DLL 卡死了。
+            //
+            // ⚠️ 关管道**不足以**让 agent 退出 —— 它正卡在 DLL 的死循环里,
+            // 根本没在读 stdin。所以必须硬杀,否则留下一个永远空转的进程
+            // 占着 CPU 与内存,反复几次就把机器拖垮了。
+            w.dead = true;
+            w.exit_code = XMEX_FFI_TIMEOUT_EXIT;   // 超时不是崩溃,单独记一个码
+            xmex_proc_kill(w.proc);
+            xmex_pipe_close(w.to_child);
+            w.to_child = XMEX_PIPE_INVALID;
+            error = "worker timed out after " + std::to_string((long)XMEX_FFI_TIMEOUT_MS) +
+                    "ms (killed)";
+            return false;
+        }
+        if (got == -1) {
             // EOF:子进程死了(崩了或退出了)
             w.dead = true;
             w.exit_code = xmex_proc_wait(w.proc);
             error = "worker crashed (exit code " + std::to_string(w.exit_code) + ")";
+            return false;
+        }
+        if (got == -2) {
+            w.dead = true;
+            error = "failed to read from worker";
             return false;
         }
         if (c == '\n') break;
@@ -362,12 +395,15 @@ xmex::Value ffi_unload_v(const xmex::Value* inst, xmex::Value* args, int64_t nar
         if (it == g_workers.end()) return none_();
         IsolatedWorker& w = it->second;
         if (!w.dead) {
-            // 先礼后兵:让子进程自己退出,不行再杀
+            // 先礼后兵:发 quit 让子进程自己退出。
+            // ⚠️ 如果它卡在 DLL 的死循环里,这个请求永远等不到响应 ——
+            // worker_request 会超时并杀掉它,所以到这一步 w.dead 已经为真。
             std::string resp, err;
             worker_request(w, "{\"op\":\"quit\"}", resp, err);
             if (!w.dead) {
+                // 不响应也不崩:硬杀,别留下空转进程
                 w.dead = true;
-                w.exit_code = xmex_proc_wait(w.proc);
+                xmex_proc_kill(w.proc);
             }
         }
         xmex_pipe_close(w.to_child);
@@ -480,10 +516,15 @@ xmex::Value kv_ffi_isolated(const xmex::Value* path) {
 
     // spawn:子进程的 stdin = req_rd,stdout = rsp_wr
     // 宿主保留 req_wr(写)与 rsp_rd(读)
+    //
+    // 传 --ready-file:agent 加载完 DLL 会往这个文件写 "ready"。
+    // 握手时我们读那一行响应就够了,但 ready 文件给了纳管场景(kv.add)
+    // 一个不依赖管道的就绪判据 —— 那个场景下没人读 agent 的 stdout。
+    std::string ready_path = std::string(p) + ".ready";
     std::string agent = agent_path();
-    const char* argv[1] = {p.c_str()};
+    const char* argv[3] = {p.c_str(), "--ready-file", ready_path.c_str()};
     xmex_proc_t proc = XMEX_PROC_INVALID;
-    if (!xmex_spawn(agent.c_str(), argv, 1, req_rd, rsp_wr, &proc)) {
+    if (!xmex_spawn(agent.c_str(), argv, 3, req_rd, rsp_wr, &proc)) {
         xmex_pipe_close(req_rd); xmex_pipe_close(req_wr);
         xmex_pipe_close(rsp_rd); xmex_pipe_close(rsp_wr);
         std::string e = "{\"ok\":false,\"error\":\"failed to spawn ffi agent: " + agent + "\"}";

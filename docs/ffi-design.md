@@ -97,10 +97,48 @@ after crash: {"ok":false,"error":"worker already dead (exit code 139)"}
 宿主按「与宿主可执行文件同目录」推断：`bin/xmex_ffi_agent`。也可以用环境变量
 `XMEX_FFI_AGENT` 指定绝对路径（部署到别处时用）。
 
-### 2.4 隔离模式暂不支持回调
+### 2.4 超时保护
 
-回调要跨进程反向通道（子进程 → 宿主），且要处理「宿主正在等调用结果、
-同时又要执行回调」的重入问题。这是独立的一期工作。
+DLL 里一个死循环就能让宿主**永久**卡在读管道上。隔离模式只隔离了崩溃，
+隔离不了卡死 —— 所以必须有超时。
+
+实现是 `xmex_pipe_read_byte_timeout`：每读一个字节最多等 5 秒
+（`XMEX_FFI_TIMEOUT_MS`，编译期可改）。超时后：
+
+1. **硬杀 worker**（`xmex_proc_kill` → Windows `TerminateProcess` /
+   POSIX `SIGKILL`），不是只关管道
+2. 退出码记为 `-124`，与任何真实崩溃码（139/134/...）区分开
+3. 返回 `{"ok":false,"error":"worker timed out after 5000ms (killed)"}`
+
+> ⚠️ **只关管道不足以让 agent 退出** —— 它正卡在 DLL 的死循环里，
+> 根本没在读 stdin。实测：只关管道时 demo 要跑 61 秒（空转进程在烧 CPU），
+> 加上硬杀后降到 10.8 秒。
+
+`unload` 也走同一条路：先发 `quit`，若不响应就硬杀。
+
+### 2.5 与 kv.add 组合：agent 可以被纳管
+
+`xmex_ffi_agent` 本身就是个「加载 DLL 并服务调用」的进程，正好是
+`kv.add` 能纳管的对象。启动时**先加载 DLL 再进请求循环**，加载失败以
+退出码 3 退出 —— 调谐下一轮就会看到「进程没了」并重新拉起，不会留下
+一个假装活着的空壳。
+
+```python
+kv.add("ffi-worker-1", "/path/bin/xmex_ffi_agent",
+       ["/path/to/lib.so", "--ready-file", "/tmp/ffi.ready"],
+       "/tmp/ffi", "")
+kv.reconcile_start(1000)
+```
+
+**`--ready-file <路径>`**：加载成功后往该文件写一行 `ready`。
+这是给纳管场景的就绪判据 —— 调谐循环只看「pid 还活着吗」，那区分不了
+「服务就绪」与「进程空转」。没人读 agent 的 stdout（纳管场景下没有宿主
+握手），所以要靠这个文件。另一个选择是发 `ping`，返回
+`{"ok":true,"ready":true}`。
+
+⚠️ 调谐与 FFI 是**两个独立子系统，代码零引用**。它们回答不同问题：
+FFI 问「函数调用成没成」（同步返回值），调谐问「进程还活着没」（持续观测）。
+这里能组合只是因为 agent 恰好是个普通进程。
 
 ---
 

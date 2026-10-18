@@ -255,6 +255,18 @@ print("宿主还活着")                # ← 确实还活着
 
 例子:[examples/ffi_isolated_demo.pys](examples/ffi_isolated_demo.pys)。
 
+**把 agent 当成被纳管的进程**(Linux,与调谐循环组合):
+
+```python
+kv.add("ffi-worker-1", "/path/bin/xmex_ffi_agent",
+       ["/path/to/lib.so", "--ready-file", "/tmp/ffi.ready"], "/tmp/ffi", "")
+kv.reconcile_start(1000)
+```
+
+agent 启动时先加载 DLL 再进请求循环,加载失败以退出码 3 退出 —— 调谐下一轮
+就会看到「进程没了」并重新拉起。`--ready-file` 让纳管方能判断「DLL 已就绪」
+而不只是「进程还活着」。
+
 ### 7. 进程纳管与调谐(Linux)
 
 `kv.add` 纳管一个**可执行文件** —— 和 `kv.ffi` 加载动态库是两回事,别混用。
@@ -298,7 +310,7 @@ kv.group_status("shard-1")
 | `.pys` 里有中文注释就编译失败 | 词法器不接受非 ASCII 字符,`.pys` 的注释必须用英文 |
 | `kv.ffi` 报 `symbol not found: xxx` | 动态库的符号被 C++ mangle 了,导出函数必须写在 `extern "C"` 里 |
 | `kv.ffi` 报 `dlopen failed` | 路径不对,或依赖的 DLL 不在同目录(Windows 上要放在 exe 旁边) |
-| `kv.ffi_isolated` 卡住不动 | 隔离模式**没有超时保护**,DLL 若死循环宿主会一直等(见「已知限制」) |
+| `kv.ffi_isolated` 卡住不动 | 默认 5 秒超时。若仍卡住,检查是否在超时前就 spawn 失败(看 stderr) |
 | `kv.ffi_isolated` 报 `worker crashed` | 这是**预期行为** —— DLL 崩了,只有子进程死,宿主活着 |
 | `kv.add` / `kv.group_*` 报未定义 | 这些是 **Linux only**,Windows 上没有(见「平台差异」) |
 | `kv.reconcile_*` 报未定义 | 同上,Linux only |
@@ -399,7 +411,10 @@ kv.group_status("shard-1")
 - **必须按固定调用约定导出**:`int64_t fn(int64_t*, int64_t, int64_t*)`。
   任意 C 签名不支持 —— `dlsym` 拿到的裸指针没有类型信息
 - **隔离模式不支持回调**(2026-10 第一版)。回调要跨进程反向通道
-- **隔离模式没有超时保护**。DLL 死循环会让宿主永久阻塞(超时是独立的一期工作)
+- 隔离模式有 **5 秒超时**(编译期 `XMEX_FFI_TIMEOUT_MS` 可改),超时后硬杀 worker。
+  退出码记 `-124` 以区别于真实崩溃码(139/134/...)
+- **agent 被 `kv.add` 纳管时没有就绪判据的闭环**:调谐只看「pid 还活着」,
+  要判「DLL 已就绪」得自己查 `--ready-file` 或发 `ping`
 - 跨进程时字符串要序列化:进程内传的是指针,跨进程必须传内容
 - 动态库崩了退出码统一成 POSIX 风格(128+signal),Windows 的 NTSTATUS 已折算
 
