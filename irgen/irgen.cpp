@@ -561,6 +561,20 @@ static const char *builtinModulePrefix(const std::string &mod, const std::string
     if (fn == "rewind") return "kv_iter_rewind_v";
     if (fn == "iter_destroy") return "kv_iter_destroy_v";
     if (fn == "iter_live") return "kv_iter_live_v";
+    // 声明式调谐方法(2026-10 增补):后台把 observed 拉回 desired,
+    // 副本组补足到期望副本数。设计见 docs/distributed-reconcile-design.md
+    if (fn == "reconcile_start") return "kv_reconcile_start_v";
+    if (fn == "reconcile_stop") return "kv_reconcile_stop_v";
+    if (fn == "reconcile_status") return "kv_reconcile_status_v";
+    if (fn == "reconcile_once") return "kv_reconcile_once_v";
+    if (fn == "unskip") return "kv_unskip_v";
+    if (fn == "failures") return "kv_failures_v";
+    // 副本组方法(2026-10 增补):声明副本数,调谐循环自动补足
+    if (fn == "group_create") return "kv_group_create_v";
+    if (fn == "group_add") return "kv_group_add_v";
+    if (fn == "group_replicas") return "kv_group_replicas_v";
+    if (fn == "group_status") return "kv_group_status_v";
+    if (fn == "group_destroy") return "kv_group_destroy_v";
     // 节点内置 MQ 队列方法(2026-10 增补)
     if (fn == "enqueue") return "kv_enqueue_v";
     if (fn == "dequeue") return "kv_dequeue_v";

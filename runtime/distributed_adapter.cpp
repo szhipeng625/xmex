@@ -236,6 +236,48 @@ xmex::Value file_read_v(const xmex::Value* path) {
 xmex::Value str_to_int_v(const xmex::Value* s) {
     return int_(str_to_int(strPtr(s), strLen(s)));
 }
+
+// ====== 声明式调谐与副本组适配器(2026-10 增补) ======
+// 设计见 docs/distributed-reconcile-design.md。这批接口不需要 strPtr/strLen
+// 转换 —— 底层签名本来就收 xmex::Value*,与适配层其余部分不同。
+
+xmex::Value kv_reconcile_start_v(const xmex::Value* interval_ms) {
+    return kv_reconcile_start(interval_ms);
+}
+xmex::Value kv_reconcile_stop_v() {
+    return kv_reconcile_stop();
+}
+xmex::Value kv_reconcile_status_v() {
+    return kv_reconcile_status();
+}
+xmex::Value kv_reconcile_once_v() {
+    return kv_reconcile_once();
+}
+xmex::Value kv_unskip_v(const xmex::Value* node_id) {
+    return kv_unskip(node_id);
+}
+xmex::Value kv_failures_v(const xmex::Value* node_id) {
+    return kv_failures(node_id);
+}
+xmex::Value kv_group_create_v(const xmex::Value* group_id,
+                              const xmex::Value* replicas,
+                              const xmex::Value* binary,
+                              const xmex::Value* work_dir_prefix,
+                              const xmex::Value* addr_prefix) {
+    return kv_group_create(group_id, replicas, binary, work_dir_prefix, addr_prefix);
+}
+xmex::Value kv_group_add_v(const xmex::Value* group_id, const xmex::Value* node_id) {
+    return kv_group_add(group_id, node_id);
+}
+xmex::Value kv_group_replicas_v(const xmex::Value* group_id, const xmex::Value* n) {
+    return kv_group_replicas(group_id, n);
+}
+xmex::Value kv_group_status_v(const xmex::Value* group_id) {
+    return kv_group_status(group_id);
+}
+xmex::Value kv_group_destroy_v(const xmex::Value* group_id) {
+    return kv_group_destroy(group_id);
+}
 xmex::Value int_to_str_v(const xmex::Value* v) {
     int64_t n = (v && v->tag == xmex::kInt) ? v->as.i : 0;
     return int_to_str(n);

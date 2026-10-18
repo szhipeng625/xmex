@@ -20,11 +20,56 @@ static std::string node_to_json(const KvNode& n) {
     json << "{";
     json << "\"node_id\":\"" << n.node_id << "\",";
     json << "\"addr\":\"" << n.addr << "\",";
+    // 声明式字段(2026-10 增补):desired 是声明的意图,observed 是实测的事实。
+    // 两者不一致即说明调谐循环有活要干。
+    json << "\"desired\":\"" << desired_str(n.desired) << "\",";
+    json << "\"observed\":\"" << observed_str(n.observed) << "\",";
     json << "\"state\":\"" << state << "\",";
     json << "\"pid\":" << n.pid << ",";
     json << "\"started_at_ms\":" << n.started_at_ms << ",";
     json << "\"last_active_ms\":" << n.last_active_ms << ",";
+    json << "\"last_update_ms\":" << n.last_update_ms << ",";
+    json << "\"last_error\":\"" << n.last_error << "\",";
     json << "\"restart_count\":" << n.restart_count;
+    json << "}";
+    return json.str();
+}
+
+// 副本组转 JSON
+static std::string group_to_json(const ReplicaGroup& g) {
+    std::ostringstream json;
+    json << "{";
+    json << "\"group_id\":\"" << g.group_id << "\",";
+    json << "\"desired_replica_count\":" << g.desired_replica_count << ",";
+    json << "\"member_count\":" << g.member_ids.size() << ",";
+    json << "\"members\":[";
+    for (size_t i = 0; i < g.member_ids.size(); ++i) {
+        if (i) json << ",";
+        json << "\"" << g.member_ids[i] << "\"";
+    }
+    json << "]";
+    json << "}";
+    return json.str();
+}
+
+// 调谐报告转 JSON
+static std::string reconcile_report_json(const ReconcileReport& r) {
+    auto arr = [](const std::vector<std::string>& v) {
+        std::ostringstream o;
+        o << "[";
+        for (size_t i = 0; i < v.size(); ++i) {
+            if (i) o << ",";
+            o << "\"" << v[i] << "\"";
+        }
+        o << "]";
+        return o.str();
+    };
+    std::ostringstream json;
+    json << "{\"actions\":" << r.actions;
+    json << ",\"repaired\":" << arr(r.repaired);
+    json << ",\"retired\":" << arr(r.retired);
+    json << ",\"failed\":" << arr(r.failed);
+    json << ",\"replaced\":" << arr(r.replaced);
     json << "}";
     return json.str();
 }
@@ -483,6 +528,151 @@ xmex::Value kv_iter_destroy(const xmex::Value* it) {
     std::lock_guard<std::mutex> lk(g_kv_iter_mutex);
     g_kv_iters.erase(handle);
     return none_();
+}
+
+// ============================================================================
+// 声明式调谐接口(2026-10 增补)
+// 参照 adviskv 的 ReplicaGroup / reconcile 设计,详见 docs/distributed-reconcile-design.md
+// ============================================================================
+
+// kv.reconcile_start(interval_ms) → 启动后台调谐循环;不传则默认 1000ms
+xmex::Value kv_reconcile_start(const xmex::Value* interval_ms) {
+    int64_t iv = (interval_ms && interval_ms->tag == xmex::kInt)
+                   ? interval_ms->as.i : 1000;
+    KvAdmin::instance().start_reconcile(iv);
+    std::ostringstream json;
+    json << "{\"running\":true,\"interval_ms\":" << iv << "}";
+    std::string s = json.str();
+    return str_new(s.c_str(), s.size());
+}
+
+// kv.reconcile_stop() → 停止调谐循环
+xmex::Value kv_reconcile_stop() {
+    KvAdmin::instance().stop_reconcile();
+    return str_new("{\"running\":false}", 0);
+}
+
+// kv.reconcile_status() → {"running":bool,"nodes":N,"groups":G}
+xmex::Value kv_reconcile_status() {
+    KvAdmin& mgr = KvAdmin::instance();
+    std::ostringstream json;
+    json << "{\"running\":" << (mgr.reconcile_running() ? "true" : "false");
+    json << ",\"nodes\":" << mgr.list_nodes().size();
+    json << ",\"groups\":" << mgr.group_list().size();
+    json << "}";
+    return str_new(json.str().c_str(), json.str().size());
+}
+
+// kv.reconcile_once() → 手动跑一轮,返回详细报告
+xmex::Value kv_reconcile_once() {
+    ReconcileReport rep = KvAdmin::instance().reconcile_report_once();
+    std::string s = reconcile_report_json(rep);
+    return str_new(s.c_str(), s.size());
+}
+
+// kv.unskip(node_id) → 把 skip 过的节点恢复期望并立刻拉起
+xmex::Value kv_unskip(const xmex::Value* node_id) {
+    std::string id(node_id && node_id->tag == xmex::kStr
+                       ? str_data(node_id) : "", str_size(node_id));
+    std::string error;
+    bool ok = KvAdmin::instance().unskip(id, error);
+    std::ostringstream json;
+    json << "{\"ok\":" << (ok ? "true" : "false") << ",\"error\":\"" << error << "\"}";
+    std::string s = json.str();
+    return str_new(s.c_str(), s.size());
+}
+
+// kv.failures(node_id) → 该节点连续拉起失败次数(0 表示健康)
+xmex::Value kv_failures(const xmex::Value* node_id) {
+    std::string id(node_id && node_id->tag == xmex::kStr
+                       ? str_data(node_id) : "", str_size(node_id));
+    std::ostringstream json;
+    json << "{\"node_id\":\"" << id << "\",\"consecutive_failures\":"
+         << KvAdmin::instance().consecutive_failures(id) << "}";
+    std::string s = json.str();
+    return str_new(s.c_str(), s.size());
+}
+
+// ---- 副本组 ----
+
+static std::string group_id_of(const xmex::Value* v) {
+    return (v && v->tag == xmex::kStr) ? std::string(str_data(v), str_size(v)) : "";
+}
+
+// kv.group_create(group_id, replicas, binary, work_dir_prefix, addr_prefix)
+//                → 声明一个副本组;replicas 为期望副本数
+xmex::Value kv_group_create(const xmex::Value* group_id,
+                            const xmex::Value* replicas,
+                            const xmex::Value* binary,
+                            const xmex::Value* work_dir_prefix,
+                            const xmex::Value* addr_prefix) {
+    int32_t n = (replicas && replicas->tag == xmex::kInt)
+                    ? static_cast<int32_t>(replicas->as.i) : 1;
+    std::string error;
+    bool ok = KvAdmin::instance().group_create(
+        group_id_of(group_id), n, group_id_of(binary),
+        std::vector<std::string>{}, group_id_of(work_dir_prefix),
+        group_id_of(addr_prefix), error);
+    std::ostringstream json;
+    json << "{\"ok\":" << (ok ? "true" : "false") << ",\"error\":\"" << error << "\"}";
+    std::string s = json.str();
+    return str_new(s.c_str(), s.size());
+}
+
+// kv.group_add(group_id, node_id) → 把已纳管节点纳入该组
+xmex::Value kv_group_add(const xmex::Value* group_id, const xmex::Value* node_id) {
+    std::string error;
+    bool ok = KvAdmin::instance().group_add_member(group_id_of(group_id),
+                                                   group_id_of(node_id), error);
+    std::ostringstream json;
+    json << "{\"ok\":" << (ok ? "true" : "false") << ",\"error\":\"" << error << "\"}";
+    std::string s = json.str();
+    return str_new(s.c_str(), s.size());
+}
+
+// kv.group_replicas(group_id, n) → 调整期望副本数(扩容/缩容)
+xmex::Value kv_group_replicas(const xmex::Value* group_id, const xmex::Value* n) {
+    int32_t cnt = (n && n->tag == xmex::kInt) ? static_cast<int32_t>(n->as.i) : 0;
+    std::string error;
+    bool ok = KvAdmin::instance().group_set_replicas(group_id_of(group_id), cnt, error);
+    std::ostringstream json;
+    json << "{\"ok\":" << (ok ? "true" : "false") << ",\"error\":\"" << error << "\"}";
+    std::string s = json.str();
+    return str_new(s.c_str(), s.size());
+}
+
+// kv.group_status(group_id) → 组的当前状态 JSON;空 id 返回全部组
+xmex::Value kv_group_status(const xmex::Value* group_id) {
+    KvAdmin& mgr = KvAdmin::instance();
+    std::string gid = group_id_of(group_id);
+    std::ostringstream json;
+    if (gid.empty()) {
+        auto groups = mgr.group_list();
+        json << "[";
+        for (size_t i = 0; i < groups.size(); ++i) {
+            if (i) json << ",";
+            json << group_to_json(groups[i]);
+        }
+        json << "]";
+    } else {
+        ReplicaGroup g;
+        if (!mgr.group_get(gid, g)) {
+            return str_new("{}", 2);
+        }
+        json << group_to_json(g);
+    }
+    std::string s = json.str();
+    return str_new(s.c_str(), s.size());
+}
+
+// kv.group_destroy(group_id) → 解散副本组(成员进程不受影响)
+xmex::Value kv_group_destroy(const xmex::Value* group_id) {
+    std::string error;
+    bool ok = KvAdmin::instance().group_destroy(group_id_of(group_id), error);
+    std::ostringstream json;
+    json << "{\"ok\":" << (ok ? "true" : "false") << ",\"error\":\"" << error << "\"}";
+    std::string s = json.str();
+    return str_new(s.c_str(), s.size());
 }
 
 }  // extern "C"

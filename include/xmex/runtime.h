@@ -630,6 +630,30 @@ xmex::Value kv_iter_rewind(const xmex::Value *it);
 // kv.iter_destroy(it):销毁迭代器释放快照
 xmex::Value kv_iter_destroy(const xmex::Value *it);
 
+// ---- 声明式调谐(2026-10 增补) ----
+// 后台把 observed 拉回 desired:进程崩了自动拉起,desired=absent 的摘除。
+// 不启动循环时行为与从前完全一致(命令式),调谐是可选增强。
+// 详见 docs/distributed-reconcile-design.md
+xmex::Value kv_reconcile_start(const xmex::Value *interval_ms);
+xmex::Value kv_reconcile_stop();
+xmex::Value kv_reconcile_status();
+xmex::Value kv_reconcile_once();          // 手动一轮,返回详细报告
+xmex::Value kv_unskip(const xmex::Value *node_id);
+xmex::Value kv_failures(const xmex::Value *node_id);
+
+// ---- 副本组(2026-10 增补) ----
+// 声明「这一组要几个副本」;成员不健康时调谐循环自动补足到期望副本数。
+// 参照 adviskv ReplicaGroup 设计。
+xmex::Value kv_group_create(const xmex::Value *group_id,
+                            const xmex::Value *replicas,
+                            const xmex::Value *binary,
+                            const xmex::Value *work_dir_prefix,
+                            const xmex::Value *addr_prefix);
+xmex::Value kv_group_add(const xmex::Value *group_id, const xmex::Value *node_id);
+xmex::Value kv_group_replicas(const xmex::Value *group_id, const xmex::Value *n);
+xmex::Value kv_group_status(const xmex::Value *group_id);  // 空 id 返回全部组
+xmex::Value kv_group_destroy(const xmex::Value *group_id);
+
 // server.config(secret, node_id):配置集群通信密钥与本节点ID
 xmex::Value server_config(const xmex::Value *secret, const xmex::Value *node_id);
 // kv.iter_live():实时迭代器,next 时实时查询节点列表

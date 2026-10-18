@@ -181,6 +181,23 @@ target_link_libraries(runtime_test PRIVATE xmex_runtime)
 add_executable(gc_test tests/gc_test.cpp)
 target_link_libraries(gc_test PRIVATE xmex_runtime)
 
+# 调谐循环与副本组测试(2026-10 增补)。
+#
+# 刻意**不**链 xmex_runtime,而是直接编 kv_admin.cpp:这个测试走
+# set_spawn_hook 注入模式,不 fork 真实进程,因此能在任何平台跑 ——
+# 包括 Windows,那里没有 fork。这样「观测→判断→动作」这套逻辑
+# 不必等到有 Linux CI 才能验证。
+#
+# kv_admin.cpp 依赖 lsm_client.cpp(注册表持久化),一并编进来。
+if(NOT WIN32)
+  add_executable(reconcile_test tests/reconcile_test.cpp
+                 runtime/kv_admin.cpp runtime/lsm_client.cpp)
+  target_include_directories(reconcile_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(reconcile_test PRIVATE pthread)
+  add_test(NAME reconcile_test COMMAND reconcile_test)
+endif()
+
 add_executable(jit_spike tests/jit_spike.cpp)
 target_include_directories(jit_spike PRIVATE ${LLVM_INCLUDE_DIRS})
 target_link_libraries(jit_spike PRIVATE LLVM xmex_runtime)

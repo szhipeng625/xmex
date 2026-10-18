@@ -183,30 +183,101 @@ struct ReplicaGroup {
 
 ---
 
-## 五、落地顺序
+## 五、落地顺序与完成情况
 
-| 步骤 | 内容 | 涉及文件 | 依赖 |
+| 步骤 | 内容 | 涉及文件 | 状态 |
 |---|---|---|---|
-| 1 | desired/observed 字段拆分，`state` 标记 deprecated | `kv_admin.h/.cpp` | 无 |
-| 2 | 探测函数填 observed（进程存活 + 端口探针） | `kv_admin.cpp` | 1 |
-| 3 | 调谐循环 + 后台线程 | 新增 `kv_reconcile.cpp` | 2 |
-| 4 | CMakeLists 加源文件，irgen 加语言层入口 | `CMakeLists.txt`、`irgen.cpp` | 3 |
-| 5 | Redis 持久化改存 desired（现在存的是 state） | `kv_admin.cpp` | 1 |
-| 6 | 副本组（可选） | 新增 `kv_group.cpp` | 3 |
+| 1 | desired/observed 字段拆分，`state` 保留兼容 | `kv_admin.h/.cpp` | ✅ 完成 |
+| 2 | 探测函数填 observed | `kv_admin.cpp` | ✅ 完成（`probe_locked`） |
+| 3 | 调谐循环 + 后台线程 | `kv_admin.cpp` | ✅ 完成（未单独建文件，逻辑放在 kv_admin 内） |
+| 4 | CMakeLists 加源文件，irgen 加语言层入口 | `CMakeLists.txt`、`irgen.cpp` | ✅ 完成 |
+| 5 | 副本组 | `kv_admin.h/.cpp` | ✅ 完成 |
+| 6 | Redis 持久化改存 desired | `kv_admin.cpp` | ⬜ **未做，见下** |
 
-步骤 5 容易漏：现在持久化的是 `state`，加了 `desired` 后如果不同步存，
-重启后节点会丢掉意图——这正是当前设计缺陷的持久化版本。
+### 步骤 6 是唯一剩下的坑
+
+`persist_node` 现在存的是 `state`，不是 `desired`。加了 `desired` 后如果不同步存，
+**进程重启后节点会丢掉意图**——这正是原设计缺陷的持久化版本。
+
+具体表现：节点在运行中被标记 `desired=ABSENT`（准备下线），
+节点管理器重启后从 Redis 恢复出来的是 `state=stopped`，
+`desired` 回到默认的 `PRESENT`，调谐循环会把它重新拉起来。
+
+修法：`persist_node` 的 JSON 里加 `"desired":"present|absent"`，
+`restore_from_lsm` 读回来填 `node.desired`。
 
 ---
 
 ## 六、验证方式
 
-改完后至少要能验证：
+`tests/reconcile_test.cpp`（11 个用例，56 项断言）覆盖了下列要点。
+它用 `set_spawn_hook` 注入假 spawn，不 fork 真实进程，
+**因此在 Windows 上也能跑**——这是刻意的：调谐逻辑不必等到有 Linux CI 才能验证。
 
-1. 手动 `skip_node` 一个节点，等调谐周期，确认它被拉起来
-2. 杀掉节点管理器进程，重启，确认节点意图从 Redis 恢复
-3. `erase` 一个节点，确认调谐循环**不会**把它拉回来（desired=ABSENT）
-4. 反复重启调谐线程，确认状态不抖动（幂等性）
+```bash
+# Linux(CMake 已接好)
+cmake --build build && cd build && ctest -R reconcile_test --output-on-failure
+```
 
-第 3 条最容易出错——如果调谐逻辑写成「只要不在 registry 就拉起来」，
-`erase` 之后节点会复活，且反复复活/删除。
+| # | 用例 | 验证什么 |
+|---|---|---|
+| 1 | desired/observed 分离 | build 后 desired=PRESENT、observed=ALIVE |
+| 2 | 调谐幂等性 | 连续两轮，第二轮 actions==0、pid 不变 |
+| 3 | 崩溃自动恢复 | 假进程"崩"后被拉起，pid 变、restart_count 增 |
+| 4 | **erase 后不被复活** | 节点从注册表消失后调谐不会拉回来 |
+| 5 | 暂停节点不被误修复 | SIGSTOP 的节点 observed=SUSPENDED，不被当掉线 |
+| 6 | skip 语义 | 进程保留、desired 仍 PRESENT、LOST 标记可清除 |
+| 7 | 失败退避 | spawn 失败后进退避窗口，不反复重试 |
+| 8 | **副本组** | 崩溃成员原地重启；skip 成员触发补替补 |
+| 9 | 声明缩容 | 期望副本数可改 |
+| 10 | 调谐线程生命周期 | 启停幂等 |
+| 11 | 副本组调谐幂等 | 成员健康时不重复补 |
+
+### 写测试时发现的三个真实设计缺陷
+
+这三个 bug 都是测试先发现的，不是读代码看出来的：
+
+**1. 单节点调谐和组调谐会打架。**
+最初实现里，组内成员崩溃会被单节点调谐直接原地重启。这导致组调谐永远看不到
+"少了一个健康副本"这个信号，也就永远不会补替补——副本数一直是满的，
+补副本逻辑形同虚设。
+修法：给 `KvNode` 加 `group_id` 字段，组内成员的处置权归组调谐，
+单节点调谐遇到 `group_id` 非空的节点直接跳过。
+
+**2. skip 后 observed 被 probe 改回 ALIVE，副本缺口看不见。**
+`skip` 把 `state` 设成 LOST，但进程还活着，下一轮 `probe_locked` 会把
+observed 重新判成 ALIVE。而健康副本数是按 observed 统计的，于是组调谐
+以为副本还是满的，不补替补。
+修法：probe 时若 `state==LOST`，observed 继续报 CRASHED（不健康）。
+
+**3. build 阶段失败没进退避计数。**
+`build` 失败时返回 false 但没记失败次数，调谐第一轮就立刻重试，
+紧接着 build 刚返回 false 又被拉起来，看起来像抖动。
+修法：build 失败也写 `retry_` 计数与下次重试时刻。
+
+---
+
+## 七、语言层接口
+
+调谐与副本组通过 `kv.*` 内置模块暴露（`irgen.cpp` 的 `builtinModulePrefix` 映射）：
+
+| PyLite 写法 | 作用 |
+|---|---|
+| `kv.reconcile_start(1000)` | 启动后台调谐循环（毫秒间隔） |
+| `kv.reconcile_stop()` | 停止 |
+| `kv.reconcile_status()` | `{"running":bool,"nodes":N,"groups":G}` |
+| `kv.reconcile_once()` | 手动跑一轮，返回详细报告 |
+| `kv.unskip(node_id)` | 恢复被 skip 的节点并立刻拉起 |
+| `kv.failures(node_id)` | 连续拉起失败次数 |
+| `kv.group_create(id, replicas, binary, work_dir, addr)` | 声明副本组 |
+| `kv.group_add(id, node_id)` | 把已纳管节点纳入组 |
+| `kv.group_replicas(id, n)` | 调整期望副本数 |
+| `kv.group_status(id)` | 组状态；空 id 返回全部组 |
+| `kv.group_destroy(id)` | 解散组（成员进程不受影响） |
+
+`kv.status(node_id)` 的返回里现在多了 `desired` / `observed` / `last_error` /
+`last_update_ms` 四个字段，与旧的 `state` 并存。
+
+**不启动调谐循环时，一切行为与从前完全一致**（命令式）。
+这是刻意保留的：调谐是可选增强，不该成为使用门槛。
+
