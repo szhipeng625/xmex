@@ -14,42 +14,42 @@ static void check(bool ok, const char *what) {
 int main() {
   std::printf("=== 情形一:强引用归零且无弱引用 -> 立即销毁 ===\n");
   {
-    PyValue s = py_str_new("hello", 5);
+    lite::Value s = str_new("hello", 5);
     void *p = s.as.ptr;
-    py_incref(p);
-    check(py_refcount(p) == 1, "加引用后计数为 1");
-    py_incref(p);
-    check(py_refcount(p) == 2, "再加引用后计数为 2");
-    py_decref(p);
-    check(py_refcount(p) == 1, "减引用后计数为 1");
+    incref(p);
+    check(refcount(p) == 1, "加引用后计数为 1");
+    incref(p);
+    check(refcount(p) == 2, "再加引用后计数为 2");
+    decref(p);
+    check(refcount(p) == 1, "减引用后计数为 1");
   }
 
   std::printf("=== 情形二:强引用归零但有弱引用 -> 只失效,不回收 ===\n");
   {
-    PyValue s = py_str_new("world", 5);
+    lite::Value s = str_new("world", 5);
     void *p = s.as.ptr;
-    py_incref(p);
-    py_weakref(p);
-    check(py_weak_alive(p) == 1, "对象存活时弱引用判活为真");
-    py_decref(p);
-    check(py_weak_alive(p) == 0, "强引用归零后弱引用判活为假");
-    check(py_weak_upgrade(p) == 0, "对已失效对象升级失败,不返回悬空指针");
-    py_weak_release(p);
+    incref(p);
+    weakref(p);
+    check(weak_alive(p) == 1, "对象存活时弱引用判活为真");
+    decref(p);
+    check(weak_alive(p) == 0, "强引用归零后弱引用判活为假");
+    check(weak_upgrade(p) == 0, "对已失效对象升级失败,不返回悬空指针");
+    weak_release(p);
     std::printf("  (最后一个弱引用释放,内存此刻归还)\n");
   }
 
   std::printf("=== 情形三:强弱并存时,回收不应提前归还内存 ===\n");
   {
-    PyValue s = py_str_new("kept", 4);
+    lite::Value s = str_new("kept", 4);
     void *p = s.as.ptr;
-    py_incref(p);
-    py_weakref(p);
-    py_decref(p);
+    incref(p);
+    weakref(p);
+    decref(p);
     // 此时强引用已归零,但仍有弱引用;强制回收一次,内存应被保留。
-    py_gc_collect();
-    check(py_weak_alive(p) == 0, "回收后仍可安全读取失效状态(未崩溃)");
-    check(py_weak_upgrade(p) == 0, "回收后升级仍失败");
-    py_weak_release(p);
+    gc_collect();
+    check(weak_alive(p) == 0, "回收后仍可安全读取失效状态(未崩溃)");
+    check(weak_upgrade(p) == 0, "回收后升级仍失败");
+    weak_release(p);
     std::printf("  (弱引用释放,内存此刻归还)\n");
   }
 

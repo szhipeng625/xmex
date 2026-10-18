@@ -1,6 +1,6 @@
 #include "abi.h"
 
-#include "pylite/value.h"  // PY_INT 等 tag 常量,保证与 C++ 侧同源
+#include "pylite/value.h"  // lite::kInt 等 tag 常量,保证与 C++ 侧同源
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Constants.h"
@@ -21,10 +21,10 @@ Abi::Abi(Module &M) : M_(M), Ctx_(M.getContext()) {
   voidTy_ = Type::getVoidTy(Ctx_);
 
   // 同一个 context 里可能建多个 Module(REPL 每次输入一个),
-  // 所以先按名字查已有类型,避免反复 create 出 PyValue.1 / PyValue.2。
-  valueTy_ = StructType::getTypeByName(Ctx_, "PyValue");
+  // 所以先按名字查已有类型,避免反复 create 出 lite::Value.1 / lite::Value.2。
+  valueTy_ = StructType::getTypeByName(Ctx_, "lite::Value");
   if (!valueTy_) {
-    valueTy_ = StructType::create(Ctx_, {i32Ty_, i64Ty_}, "PyValue");
+    valueTy_ = StructType::create(Ctx_, {i32Ty_, i64Ty_}, "lite::Value");
   }
 
   sretAttr_ = Attribute::getWithStructRetType(Ctx_, valueTy_);
@@ -37,7 +37,7 @@ AllocaInst *Abi::allocEntry(IRBuilder<> &B, Type *ty, Value *count,
   // LLVM 只把入口块里的 alloca 当静态栈槽 —— AllocaInst::isStaticAlloca()
   // 明确要求 "在入口块"，否则会被降低成**每次执行都真的调整栈指针**的动态分配。
   // 于是循环体里只要生成过一个 alloca(比如 `total = total + i` 里那个存放
-  // py_add 结果的槽位),每次迭代都会吃掉一份栈空间,几十万次之后栈溢出。
+  // add 结果的槽位),每次迭代都会吃掉一份栈空间,几十万次之后栈溢出。
   //
   // 实测:同一段 `for i in range(N): total = total + i`,
   //   N = 50000   正常
@@ -71,7 +71,7 @@ Value *Abi::packAggregate(IRBuilder<> &B, Value *tag, Value *payloadI64) {
 }
 
 void Abi::storeInt(IRBuilder<> &B, Value *slot, int64_t v) {
-  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, PY_INT),
+  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, lite::kInt),
                               ConstantInt::get(i64Ty_, v)),
                 slot);
 }
@@ -80,25 +80,25 @@ void Abi::storeFloat(IRBuilder<> &B, Value *slot, double v) {
   // payload 字段在 LLVM 侧是 i64,所以要按位重新解释 double
   uint64_t bits;
   memcpy(&bits, &v, sizeof(bits));
-  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, PY_FLOAT),
+  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, lite::kFloat),
                               ConstantInt::get(i64Ty_, bits)),
                 slot);
 }
 
 void Abi::storeBool(IRBuilder<> &B, Value *slot, bool v) {
-  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, PY_BOOL),
+  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, lite::kBool),
                               ConstantInt::get(i64Ty_, v ? 1 : 0)),
                 slot);
 }
 
 void Abi::storeNone(IRBuilder<> &B, Value *slot) {
-  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, PY_NULL),
+  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, lite::kNull),
                               ConstantInt::get(i64Ty_, 0)),
                 slot);
 }
 
 void Abi::storeI64AsInt(IRBuilder<> &B, Value *slot, Value *i64v) {
-  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, PY_INT), i64v), slot);
+  B.CreateStore(packAggregate(B, ConstantInt::get(i32Ty_, lite::kInt), i64v), slot);
 }
 
 void Abi::copySlot(IRBuilder<> &B, Value *dst, Value *src) {
@@ -124,23 +124,23 @@ Value *Abi::loadFloat(IRBuilder<> &B, Value *slot) {
 // 这些 declare* 是"聚合体如何跨 ABI 边界"这条约定的唯一落地点,按平台分两种:
 //
 //   Win64 :聚合体(>8 字节)一律按引用传递,返回值走隐藏的 sret 指针。
-//          → void @name(ptr sret(%PyValue), ptr %a, ptr %b)
+//          → void @name(ptr sret(%lite::Value), ptr %a, ptr %b)
 //   SysV  :聚合体按值拆分到寄存器,返回值用 RAX:RDX。
-//          → %PyValue @name(%PyValue %a, %PyValue %b)
+//          → %lite::Value @name(%lite::Value %a, %lite::Value %b)
 //
 // 两侧都必须与 g++ 编译 runtime/*.cpp 时的实际降低一致。写错的表现是
 // "链接通过、lookup 成功、一执行就段错误",且几乎无法从崩溃点反推回来
 // (见 docs/llvm-notes.md 第 2 节)。
 //
 // 注意每个函数只声明一次并缓存 —— 重复创建同名函数会让 LLVM 把后来的
-// 改名成 py_add.1,而 DLL 里没有这个符号,症状同上。
+// 改名成 add.1,而 DLL 里没有这个符号,症状同上。
 // ---------------------------------------------------------------------------
 
 Function *Abi::getOrDeclare(StringRef name, FunctionType *ft, bool hasSret) {
   auto it = cache_.find(name.str());
   if (it != cache_.end()) return it->second;
 
-  // Module 里可能已经有这个名字:例如某次 callPrint 先建了 py_print,
+  // Module 里可能已经有这个名字:例如某次 callPrint 先建了 print_,
   // 之后又有代码按另一条路径要它。把已有的收进 cache_,避免重复声明。
   Function *f = M_.getFunction(name);
   if (!f) {
@@ -160,12 +160,12 @@ Function *Abi::getOrDeclare(StringRef name, FunctionType *ft, bool hasSret) {
 
 Function *Abi::declareBinRet(StringRef name) {
 #ifdef _WIN32
-  // void @name(ptr sret(%PyValue), ptr %a, ptr %b)
+  // void @name(ptr sret(%lite::Value), ptr %a, ptr %b)
   return getOrDeclare(name,
                       FunctionType::get(voidTy_, {ptrTy_, ptrTy_, ptrTy_}, false),
                       /*hasSret=*/true);
 #else
-  // Linux System V ABI: %PyValue @name(%PyValue %a, %PyValue %b)
+  // Linux System V ABI: %lite::Value @name(%lite::Value %a, %lite::Value %b)
   // LLVM 自动将 {i32,i64} 拆分为寄存器对 (rdi,rsi) 和 (rdx,rcx)
   return getOrDeclare(name,
                       FunctionType::get(valueTy_, {valueTy_, valueTy_}, false),
@@ -175,11 +175,11 @@ Function *Abi::declareBinRet(StringRef name) {
 
 Function *Abi::declareUnaryRet(StringRef name) {
 #ifdef _WIN32
-  // void @name(ptr sret(%PyValue), ptr %a)
+  // void @name(ptr sret(%lite::Value), ptr %a)
   return getOrDeclare(name, FunctionType::get(voidTy_, {ptrTy_, ptrTy_}, false),
                       /*hasSret=*/true);
 #else
-  // Linux: %PyValue @name(%PyValue %a)
+  // Linux: %lite::Value @name(%lite::Value %a)
   return getOrDeclare(name, FunctionType::get(valueTy_, {valueTy_}, false),
                       /*hasSret=*/false);
 #endif
@@ -191,7 +191,7 @@ Function *Abi::declareUnaryPred(StringRef name) {
   return getOrDeclare(name, FunctionType::get(i32Ty_, {ptrTy_}, false),
                       /*hasSret=*/false);
 #else
-  // i32 @name(%PyValue %a)  —— 谓词返回 i32 而非 i1,见 value.h
+  // i32 @name(%lite::Value %a)  —— 谓词返回 i32 而非 i1,见 value.h
   return getOrDeclare(name, FunctionType::get(i32Ty_, {valueTy_}, false),
                       /*hasSret=*/false);
 #endif
@@ -201,13 +201,13 @@ Function *Abi::declareUnaryI64(StringRef name) {
 #ifdef _WIN32
   // i64 @name(ptr %a)
   //
-  // Win64 上按值聚合体一律降级成指针,于是 py_len(const PyValue*) 与
-  // py_to_int(PyValue) 的实参在机器层是同一个东西 —— 统一按指针声明即可。
+  // Win64 上按值聚合体一律降级成指针,于是 len(const lite::Value*) 与
+  // to_int(lite::Value) 的实参在机器层是同一个东西 —— 统一按指针声明即可。
   return getOrDeclare(name, FunctionType::get(i64Ty_, {ptrTy_}, false),
                       /*hasSret=*/false);
 #else
-  // py_len 接收指针参数，py_to_int 按值接收 PyValue
-  if (name == "py_len") {
+  // len 接收指针参数，to_int 按值接收 lite::Value
+  if (name == "len") {
     return getOrDeclare(name, FunctionType::get(i64Ty_, {ptrTy_}, false),
                         /*hasSret=*/false);
   }
@@ -218,11 +218,11 @@ Function *Abi::declareUnaryI64(StringRef name) {
 
 Function *Abi::declareNullaryRet(StringRef name) {
 #ifdef _WIN32
-  // void @name(ptr sret(%PyValue))
+  // void @name(ptr sret(%lite::Value))
   return getOrDeclare(name, FunctionType::get(voidTy_, {ptrTy_}, false),
                       /*hasSret=*/true);
 #else
-  // Linux: %PyValue @name()
+  // Linux: %lite::Value @name()
   return getOrDeclare(name, FunctionType::get(valueTy_, {}, false),
                       /*hasSret=*/false);
 #endif
@@ -230,12 +230,12 @@ Function *Abi::declareNullaryRet(StringRef name) {
 
 Function *Abi::declarePtrI64Ret(StringRef name) {
 #ifdef _WIN32
-  // void @name(ptr sret(%PyValue), ptr, i64)
+  // void @name(ptr sret(%lite::Value), ptr, i64)
   return getOrDeclare(name,
                       FunctionType::get(voidTy_, {ptrTy_, ptrTy_, i64Ty_}, false),
                       /*hasSret=*/true);
 #else
-  // Linux: %PyValue @name(ptr, i64)  —— ptr/i64 参数不受聚合体规则影响
+  // Linux: %lite::Value @name(ptr, i64)  —— ptr/i64 参数不受聚合体规则影响
   return getOrDeclare(name,
                       FunctionType::get(valueTy_, {ptrTy_, i64Ty_}, false),
                       /*hasSret=*/false);
@@ -251,7 +251,7 @@ Value *Abi::callBinary(IRBuilder<> &B, StringRef fn, Value *a, Value *b) {
   call->addParamAttr(0, sretAttr_);
   return ret;
 #else
-  // 从栈槽 load 出 PyValue 值，按值传递给运行时函数
+  // 从栈槽 load 出 lite::Value 值，按值传递给运行时函数
   Value *va = B.CreateLoad(valueTy_, a);
   Value *vb = B.CreateLoad(valueTy_, b);
   Value *val = B.CreateCall(f, {va, vb}, (Twine(fn) + ".r").str());
@@ -316,15 +316,15 @@ Value *Abi::callPtrI64(IRBuilder<> &B, StringRef fn, Value *p, Value *i) {
 
 void Abi::callPrint(IRBuilder<> &B, Value *slotArray, int64_t n) {
   auto *ft = FunctionType::get(voidTy_, {ptrTy_, i64Ty_}, false);
-  Function *f = getOrDeclare("py_print", ft, /*hasSret=*/false);
+  Function *f = getOrDeclare("print_", ft, /*hasSret=*/false);
   B.CreateCall(f, {slotArray, ConstantInt::get(i64Ty_, n)});
 }
 
 void Abi::callUnpack(IRBuilder<> &B, Value *tupleSlot, Value *outArray, int64_t n) {
-  // void @py_unpack(ptr %tuple, ptr %out, i64 %n)
+  // void @unpack(ptr %tuple, ptr %out, i64 %n)
   // 三个参数都是普通标量/指针,不涉及聚合体按值传递
   auto *ft = FunctionType::get(voidTy_, {ptrTy_, ptrTy_, i64Ty_}, false);
-  Function *f = getOrDeclare("py_unpack", ft, /*hasSret=*/false);
+  Function *f = getOrDeclare("unpack", ft, /*hasSret=*/false);
   B.CreateCall(f, {tupleSlot, outArray, ConstantInt::get(i64Ty_, n)});
 }
 
@@ -350,7 +350,7 @@ Value *Abi::callN(IRBuilder<> &B, StringRef fn, ArrayRef<Type *> paramTypes,
   call->addParamAttr(0, sretAttr_);
   return ret;
 #else
-  // callN 用于 py_slice/py_call_method 等接收指针参数的函数，
+  // callN 用于 slice/call_method 等接收指针参数的函数，
   // 参数已经是栈槽指针，直接传递即可
   Function *f = getOrDeclare(fn, FunctionType::get(valueTy_, paramTypes, false),
                              /*hasSret=*/false);
@@ -371,19 +371,19 @@ void Abi::callVoidN(IRBuilder<> &B, StringRef fn, ArrayRef<Type *> paramTypes,
 }
 
 Value *Abi::truthyAsI1(IRBuilder<> &B, Value *slot) {
-  Value *t = callPredicate(B, "py_truthy", slot);
+  Value *t = callPredicate(B, "truthy", slot);
   return B.CreateICmpNE(t, ConstantInt::get(i32Ty_, 0), "truthy");
 }
 
 Value *Abi::callUnaryI64(IRBuilder<> &B, StringRef fn, Value *a) {
   Function *f = declareUnaryI64(fn);
 #ifdef _WIN32
-  // Win64 下 py_len 与 py_to_int 的实参都是指针(按值聚合体降级成指针)
+  // Win64 下 len 与 to_int 的实参都是指针(按值聚合体降级成指针)
   return B.CreateCall(f, {a}, (Twine(fn) + ".r").str());
 #else
-  // py_to_int 按值接收 PyValue，py_len 按指针接收
-  // 通过函数名区分：py_len 传指针，其余传值
-  if (fn == "py_len") {
+  // to_int 按值接收 lite::Value，len 按指针接收
+  // 通过函数名区分：len 传指针，其余传值
+  if (fn == "len") {
     return B.CreateCall(f, {a}, (Twine(fn) + ".r").str());
   }
   Value *va = B.CreateLoad(valueTy_, a);
@@ -392,10 +392,10 @@ Value *Abi::callUnaryI64(IRBuilder<> &B, StringRef fn, Value *a) {
 }
 
 void Abi::emitRuntimeError(IRBuilder<> &B, const Twine &msg) {
-  Function *f = M_.getFunction("py_runtime_error");
+  Function *f = M_.getFunction("runtime_error");
   if (!f) {
     auto *ft = FunctionType::get(voidTy_, {ptrTy_}, false);
-    f = Function::Create(ft, Function::ExternalLinkage, "py_runtime_error", M_);
+    f = Function::Create(ft, Function::ExternalLinkage, "runtime_error", M_);
     f->addFnAttr(Attribute::NoReturn);
   }
   Value *str = B.CreateGlobalString(msg.str(), ".errmsg");

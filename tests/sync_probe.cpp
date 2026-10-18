@@ -20,80 +20,80 @@ static void check(bool ok, const char *what) {
 }
 
 // ---- 场景一:单生产者、单消费者 ----
-static PyValue m1, c1;
+static lite::Value m1, c1;
 static int ready1 = 0;
 static int consumed1 = -1;
 
 static void *consumer1(void *) {
-  py_sync_mutex_lock(&m1);
+  sync_mutex_lock(&m1);
   while (ready1 == 0) {
-    py_sync_cond_wait(&c1, &m1);
+    sync_cond_wait(&c1, &m1);
   }
   consumed1 = ready1;
-  py_sync_mutex_unlock(&m1);
+  sync_mutex_unlock(&m1);
   return nullptr;
 }
 static void *producer1(void *) {
   usleep(100000);   // 让消费者先进入等待
-  py_sync_mutex_lock(&m1);
+  sync_mutex_lock(&m1);
   ready1 = 42;
-  py_sync_cond_signal(&c1);
-  py_sync_mutex_unlock(&m1);
+  sync_cond_signal(&c1);
+  sync_mutex_unlock(&m1);
   return nullptr;
 }
 
 // ---- 场景二:两个消费者、广播唤醒 ----
-static PyValue m2, c2;
+static lite::Value m2, c2;
 static int ready2 = 0;
 static int got2 = 0;
 
 static void *worker2(void *) {
-  py_sync_mutex_lock(&m2);
+  sync_mutex_lock(&m2);
   while (ready2 == 0) {
-    py_sync_cond_wait(&c2, &m2);
+    sync_cond_wait(&c2, &m2);
   }
   got2 += 1;
-  py_sync_mutex_unlock(&m2);
+  sync_mutex_unlock(&m2);
   return nullptr;
 }
 static void *producer2(void *) {
   usleep(100000);
-  py_sync_mutex_lock(&m2);
+  sync_mutex_lock(&m2);
   ready2 = 7;
-  py_sync_cond_broadcast(&c2);
-  py_sync_mutex_unlock(&m2);
+  sync_cond_broadcast(&c2);
+  sync_mutex_unlock(&m2);
   return nullptr;
 }
 
 int main() {
   std::printf("=== 互斥锁 ===\n");
-  PyValue m = py_sync_mutex_new();
-  check(m.tag == PY_INT && m.as.i > 0, "创建锁返回有效句柄");
-  py_sync_mutex_lock(&m);
-  py_sync_mutex_unlock(&m);
+  lite::Value m = sync_mutex_new();
+  check(m.tag == lite::kInt && m.as.i > 0, "创建锁返回有效句柄");
+  sync_mutex_lock(&m);
+  sync_mutex_unlock(&m);
   check(true, "加锁与解锁正常返回");
-  py_sync_mutex_free(&m);
+  sync_mutex_free(&m);
 
   std::printf("=== 条件变量 ===\n");
-  PyValue cv = py_sync_cond_new();
-  check(cv.tag == PY_INT && cv.as.i > 0, "创建条件变量返回有效句柄");
-  py_sync_cond_free(&cv);
+  lite::Value cv = sync_cond_new();
+  check(cv.tag == lite::kInt && cv.as.i > 0, "创建条件变量返回有效句柄");
+  sync_cond_free(&cv);
 
   std::printf("=== 生产/消费协作(单对单)===\n");
-  m1 = py_sync_mutex_new();
-  c1 = py_sync_cond_new();
+  m1 = sync_mutex_new();
+  c1 = sync_cond_new();
   pthread_t tc, tp;
   pthread_create(&tc, nullptr, consumer1, nullptr);
   pthread_create(&tp, nullptr, producer1, nullptr);
   pthread_join(tp, nullptr);
   pthread_join(tc, nullptr);
   check(consumed1 == 42, "消费者被唤醒后读到了生产者放入的数据");
-  py_sync_mutex_free(&m1);
-  py_sync_cond_free(&c1);
+  sync_mutex_free(&m1);
+  sync_cond_free(&c1);
 
   std::printf("=== 广播唤醒多个消费者 ===\n");
-  m2 = py_sync_mutex_new();
-  c2 = py_sync_cond_new();
+  m2 = sync_mutex_new();
+  c2 = sync_cond_new();
   pthread_t w1, w2, tp2;
   pthread_create(&w1, nullptr, worker2, nullptr);
   pthread_create(&w2, nullptr, worker2, nullptr);
@@ -102,12 +102,12 @@ int main() {
   pthread_join(w1, nullptr);
   pthread_join(w2, nullptr);
   check(got2 == 2, "广播后两个消费者都被唤醒");
-  py_sync_mutex_free(&m2);
-  py_sync_cond_free(&c2);
+  sync_mutex_free(&m2);
+  sync_cond_free(&c2);
 
   std::printf("=== 快照 ===\n");
-  PyValue st = py_sync_stats();
-  check(st.tag == PY_STR && std::strstr(py_str_data(&st), "mutexes") != nullptr,
+  lite::Value st = sync_stats();
+  check(st.tag == lite::kStr && std::strstr(str_data(&st), "mutexes") != nullptr,
         "同步原语快照可获取");
 
   std::printf("\n%s (失败 %d 项)\n", g_fail ? "FAILED" : "PASSED", g_fail);

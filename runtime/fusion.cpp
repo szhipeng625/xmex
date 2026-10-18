@@ -78,23 +78,23 @@ char *jsonEscape(const char *s, int64_t len) {
 
 // fusion_create_graph(name: str) -> str
 // 创建一个空的算子计算图，返回图 ID。
-extern "C" PyValue py_fusion_create_graph(const PyValue *name) {
-  if (name->tag != PY_STR) {
-    py_runtime_error("fusion_create_graph() 需要一个字符串参数: name");
+extern "C" lite::Value fusion_create_graph(const lite::Value *name) {
+  if (name->tag != lite::kStr) {
+    runtime_error("fusion_create_graph() 需要一个字符串参数: name");
   }
 
-  const char *n = py_str_data(name);
-  int64_t nLen = py_str_size(name);
+  const char *n = str_data(name);
+  int64_t nLen = str_size(name);
 
   size_t cap = static_cast<size_t>(nLen) + 256;
   char *graph = static_cast<char *>(malloc(cap));
-  if (!graph) py_runtime_error("内存不足");
+  if (!graph) runtime_error("内存不足");
 
   snprintf(graph, cap,
     "{\"name\":\"%.*s\",\"nodes\":[],\"edges\":[],\"inputs\":[],\"outputs\":[]}",
     static_cast<int>(nLen), n);
 
-  PyValue result = py_str_new(graph, static_cast<int64_t>(strlen(graph)));
+  lite::Value result = str_new(graph, static_cast<int64_t>(strlen(graph)));
   free(graph);
   return result;
 }
@@ -106,30 +106,30 @@ extern "C" PyValue py_fusion_create_graph(const PyValue *name) {
 // params: JSON 对象，如 {"in_features":768,"out_features":3072}
 //
 // 返回更新后的计算图 JSON。
-extern "C" PyValue py_fusion_add_op(const PyValue *graph,
-                                     const PyValue *opType,
-                                     const PyValue *opName,
-                                     const PyValue *params) {
-  if (graph->tag != PY_STR || opType->tag != PY_STR || opName->tag != PY_STR) {
-    py_runtime_error("fusion_add_op() 需要字符串参数: graph, op_type, op_name");
+extern "C" lite::Value fusion_add_op(const lite::Value *graph,
+                                     const lite::Value *opType,
+                                     const lite::Value *opName,
+                                     const lite::Value *params) {
+  if (graph->tag != lite::kStr || opType->tag != lite::kStr || opName->tag != lite::kStr) {
+    runtime_error("fusion_add_op() 需要字符串参数: graph, op_type, op_name");
   }
 
-  const char *g = py_str_data(graph);
-  const char *type = py_str_data(opType);
-  const char *name = py_str_data(opName);
-  const char *p = (params->tag == PY_STR) ? py_str_data(params) : "{}";
+  const char *g = str_data(graph);
+  const char *type = str_data(opType);
+  const char *name = str_data(opName);
+  const char *p = (params->tag == lite::kStr) ? str_data(params) : "{}";
 
-  int64_t gLen = py_str_size(graph);
-  int64_t typeLen = py_str_size(opType);
-  int64_t nameLen = py_str_size(opName);
-  int64_t pLen = (params->tag == PY_STR) ? py_str_size(params) : 2;
+  int64_t gLen = str_size(graph);
+  int64_t typeLen = str_size(opType);
+  int64_t nameLen = str_size(opName);
+  int64_t pLen = (params->tag == lite::kStr) ? str_size(params) : 2;
 
   // 在 nodes 数组末尾插入新节点
   const char *nodesEnd = strstr(g, "\"nodes\":[");
-  if (!nodesEnd) py_runtime_error("fusion_add_op() 失败: 无效的计算图格式");
+  if (!nodesEnd) runtime_error("fusion_add_op() 失败: 无效的计算图格式");
 
   const char *arrStart = strchr(nodesEnd, '[');
-  if (!arrStart) py_runtime_error("fusion_add_op() 失败: 无效的计算图格式");
+  if (!arrStart) runtime_error("fusion_add_op() 失败: 无效的计算图格式");
 
   // 找到 nodes 数组的结束 ]
   const char *end = g + gLen - 1;
@@ -146,7 +146,7 @@ extern "C" PyValue py_fusion_add_op(const PyValue *graph,
     }
   }
 
-  if (!nodesClose) py_runtime_error("fusion_add_op() 失败: 无效的计算图格式");
+  if (!nodesClose) runtime_error("fusion_add_op() 失败: 无效的计算图格式");
 
   bool isEmpty = (nodesClose == arrStart + 1);
 
@@ -155,7 +155,7 @@ extern "C" PyValue py_fusion_add_op(const PyValue *graph,
 
   size_t cap = prefixLen + static_cast<size_t>(typeLen + nameLen + pLen) + suffixLen + 256;
   char *newGraph = static_cast<char *>(malloc(cap));
-  if (!newGraph) py_runtime_error("内存不足");
+  if (!newGraph) runtime_error("内存不足");
 
   char *escType = jsonEscape(type, typeLen);
   char *escName = jsonEscape(name, nameLen);
@@ -179,7 +179,7 @@ extern "C" PyValue py_fusion_add_op(const PyValue *graph,
   free(escType);
   free(escName);
 
-  PyValue result = py_str_new(newGraph, static_cast<int64_t>(strlen(newGraph)));
+  lite::Value result = str_new(newGraph, static_cast<int64_t>(strlen(newGraph)));
   free(newGraph);
   return result;
 }
@@ -217,18 +217,18 @@ static const FusionPattern g_patterns[] = {
 
 // fusion_apply_rules(graph: str) -> str
 // 对计算图应用融合规则，返回优化后的计算图。
-extern "C" PyValue py_fusion_apply_rules(const PyValue *graph) {
-  if (graph->tag != PY_STR) {
-    py_runtime_error("fusion_apply_rules() 需要一个字符串参数: graph");
+extern "C" lite::Value fusion_apply_rules(const lite::Value *graph) {
+  if (graph->tag != lite::kStr) {
+    runtime_error("fusion_apply_rules() 需要一个字符串参数: graph");
   }
 
-  const char *g = py_str_data(graph);
-  int64_t gLen = py_str_size(graph);
+  const char *g = str_data(graph);
+  int64_t gLen = str_size(graph);
 
   // 构建融合报告
   size_t cap = static_cast<size_t>(gLen) + 4096;
   char *report = static_cast<char *>(malloc(cap));
-  if (!report) py_runtime_error("内存不足");
+  if (!report) runtime_error("内存不足");
 
   int n = snprintf(report, cap,
     "{\"original\":%.*s,"
@@ -281,7 +281,7 @@ extern "C" PyValue py_fusion_apply_rules(const PyValue *graph) {
     "],\"optimized\":%.*s}",
     static_cast<int>(gLen), g);
 
-  PyValue result = py_str_new(report, static_cast<int64_t>(n));
+  lite::Value result = str_new(report, static_cast<int64_t>(n));
   free(report);
   return result;
 }
@@ -297,19 +297,19 @@ extern "C" PyValue py_fusion_apply_rules(const PyValue *graph) {
 // config: JSON 配置，如 {"M":1024,"N":4096,"K":768,"tile_m":128,"tile_n":128,"tile_k":32}
 //
 // 返回 CUDA 内核源码字符串。
-extern "C" PyValue py_fusion_generate_kernel(const PyValue *fusedOp,
-                                              const PyValue *config) {
-  if (fusedOp->tag != PY_STR) {
-    py_runtime_error("fusion_generate_kernel() 需要字符串参数: fused_op");
+extern "C" lite::Value fusion_generate_kernel(const lite::Value *fusedOp,
+                                              const lite::Value *config) {
+  if (fusedOp->tag != lite::kStr) {
+    runtime_error("fusion_generate_kernel() 需要字符串参数: fused_op");
   }
 
-  const char *op = py_str_data(fusedOp);
-  int64_t opLen = py_str_size(fusedOp);
+  const char *op = str_data(fusedOp);
+  int64_t opLen = str_size(fusedOp);
 
   // 根据融合算子类型生成对应的 CUDA 内核
   size_t cap = 8192;
   char *kernel = static_cast<char *>(malloc(cap));
-  if (!kernel) py_runtime_error("内存不足");
+  if (!kernel) runtime_error("内存不足");
 
   int n = 0;
 
@@ -449,7 +449,7 @@ extern "C" PyValue py_fusion_generate_kernel(const PyValue *fusedOp,
       static_cast<int>(opLen), op);
   }
 
-  PyValue result = py_str_new(kernel, static_cast<int64_t>(n));
+  lite::Value result = str_new(kernel, static_cast<int64_t>(n));
   free(kernel);
   return result;
 }
@@ -462,18 +462,18 @@ extern "C" PyValue py_fusion_generate_kernel(const PyValue *fusedOp,
 // 针对给定的矩阵规模自动搜索最优的 tile 配置。
 //
 // 返回最优配置 JSON。
-extern "C" PyValue py_fusion_autotune(const PyValue *opType,
-                                      const PyValue *M,
-                                      const PyValue *N,
-                                      const PyValue *K) {
-  if (opType->tag != PY_STR || M->tag != PY_INT ||
-      N->tag != PY_INT || K->tag != PY_INT) {
-    py_runtime_error("fusion_autotune() 需要 (str, int, int, int) 参数");
+extern "C" lite::Value fusion_autotune(const lite::Value *opType,
+                                      const lite::Value *M,
+                                      const lite::Value *N,
+                                      const lite::Value *K) {
+  if (opType->tag != lite::kStr || M->tag != lite::kInt ||
+      N->tag != lite::kInt || K->tag != lite::kInt) {
+    runtime_error("fusion_autotune() 需要 (str, int, int, int) 参数");
   }
 
-  int64_t m = py_as_int(*M);
-  int64_t n = py_as_int(*N);
-  int64_t k = py_as_int(*K);
+  int64_t m = as_int(*M);
+  int64_t n = as_int(*N);
+  int64_t k = as_int(*K);
 
   // 启发式搜索最优 tile 配置
   // 基于 GPU 架构特性（SM 数量、共享内存大小、寄存器数量）
@@ -524,29 +524,29 @@ extern "C" PyValue py_fusion_autotune(const PyValue *opType,
     (m + candidates[bestIdx].tile_m - 1) / candidates[bestIdx].tile_m,
     candidates[bestIdx].tile_m * candidates[bestIdx].tile_k * 4 * 2);
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // fusion_compile_and_run(kernel_code: str, kernel_name: str,
 //                          M: int, N: int, K: int) -> str
 // 编译 CUDA 内核并执行，返回性能统计。
-extern "C" PyValue py_fusion_compile_and_run(const PyValue *kernelCode,
-                                              const PyValue *kernelName,
-                                              const PyValue *M,
-                                              const PyValue *N,
-                                              const PyValue *K) {
-  if (kernelCode->tag != PY_STR || kernelName->tag != PY_STR) {
-    py_runtime_error("fusion_compile_and_run() 需要字符串参数: kernel_code, kernel_name");
+extern "C" lite::Value fusion_compile_and_run(const lite::Value *kernelCode,
+                                              const lite::Value *kernelName,
+                                              const lite::Value *M,
+                                              const lite::Value *N,
+                                              const lite::Value *K) {
+  if (kernelCode->tag != lite::kStr || kernelName->tag != lite::kStr) {
+    runtime_error("fusion_compile_and_run() 需要字符串参数: kernel_code, kernel_name");
   }
 
-  const char *code = py_str_data(kernelCode);
-  const char *name = py_str_data(kernelName);
-  int64_t codeLen = py_str_size(kernelCode);
+  const char *code = str_data(kernelCode);
+  const char *name = str_data(kernelName);
+  int64_t codeLen = str_size(kernelCode);
 
   // 将内核代码写入临时文件
   const char *tmpCu = "/tmp/pylite_fusion_kernel.cu";
   FILE *fp = fopen(tmpCu, "w");
-  if (!fp) py_runtime_error("无法创建临时文件");
+  if (!fp) runtime_error("无法创建临时文件");
   fwrite(code, 1, static_cast<size_t>(codeLen), fp);
   fclose(fp);
 
@@ -554,7 +554,7 @@ extern "C" PyValue py_fusion_compile_and_run(const PyValue *kernelCode,
   const char *tmpPtx = "/tmp/pylite_fusion_kernel.ptx";
   size_t cmdCap = static_cast<size_t>(codeLen) + 256;
   char *cmd = static_cast<char *>(malloc(cmdCap));
-  if (!cmd) py_runtime_error("内存不足");
+  if (!cmd) runtime_error("内存不足");
 
   snprintf(cmd, cmdCap,
     "nvcc -ptx -o %s %s 2>&1", tmpPtx, tmpCu);
@@ -569,7 +569,7 @@ extern "C" PyValue py_fusion_compile_and_run(const PyValue *kernelCode,
     snprintf(errBuf, sizeof(errBuf),
       "CUDA 内核编译失败:\n%s", compileOut ? compileOut : "未知错误");
     free(compileOut);
-    py_runtime_error(errBuf);
+    runtime_error(errBuf);
   }
 
   // 读取 PTX
@@ -582,9 +582,9 @@ extern "C" PyValue py_fusion_compile_and_run(const PyValue *kernelCode,
   fclose(fp);
 
   // 构造结果报告
-  int64_t m = (M->tag == PY_INT) ? py_as_int(*M) : 1024;
-  int64_t n = (N->tag == PY_INT) ? py_as_int(*N) : 4096;
-  int64_t k = (K->tag == PY_INT) ? py_as_int(*K) : 768;
+  int64_t m = (M->tag == lite::kInt) ? as_int(*M) : 1024;
+  int64_t n = (N->tag == lite::kInt) ? as_int(*N) : 4096;
+  int64_t k = (K->tag == lite::kInt) ? as_int(*K) : 768;
 
   // 估算 FLOPs 和性能
   double flops = 2.0 * static_cast<double>(m) * static_cast<double>(n) * static_cast<double>(k);
@@ -592,7 +592,7 @@ extern "C" PyValue py_fusion_compile_and_run(const PyValue *kernelCode,
 
   size_t reportCap = static_cast<size_t>(ptxSize) + 1024;
   char *report = static_cast<char *>(malloc(reportCap));
-  if (!report) { free(ptxCode); free(compileOut); py_runtime_error("内存不足"); }
+  if (!report) { free(ptxCode); free(compileOut); runtime_error("内存不足"); }
 
   snprintf(report, reportCap,
     "{\n"
@@ -612,7 +612,7 @@ extern "C" PyValue py_fusion_compile_and_run(const PyValue *kernelCode,
   remove(tmpCu);
   remove(tmpPtx);
 
-  PyValue result = py_str_new(report, static_cast<int64_t>(strlen(report)));
+  lite::Value result = str_new(report, static_cast<int64_t>(strlen(report)));
   free(report);
   return result;
 }
@@ -620,20 +620,20 @@ extern "C" PyValue py_fusion_compile_and_run(const PyValue *kernelCode,
 // fusion_benchmark(kernel_code: str, kernel_name: str,
 //                    M: int, N: int, K: int, iterations: int) -> str
 // 对融合内核进行性能基准测试。
-extern "C" PyValue py_fusion_benchmark(const PyValue *kernelCode,
-                                       const PyValue *kernelName,
-                                       const PyValue *M,
-                                       const PyValue *N,
-                                       const PyValue *K,
-                                       const PyValue *iterations) {
-  if (kernelCode->tag != PY_STR || kernelName->tag != PY_STR) {
-    py_runtime_error("fusion_benchmark() 需要字符串参数: kernel_code, kernel_name");
+extern "C" lite::Value fusion_benchmark(const lite::Value *kernelCode,
+                                       const lite::Value *kernelName,
+                                       const lite::Value *M,
+                                       const lite::Value *N,
+                                       const lite::Value *K,
+                                       const lite::Value *iterations) {
+  if (kernelCode->tag != lite::kStr || kernelName->tag != lite::kStr) {
+    runtime_error("fusion_benchmark() 需要字符串参数: kernel_code, kernel_name");
   }
 
-  int64_t m = (M->tag == PY_INT) ? py_as_int(*M) : 1024;
-  int64_t n = (N->tag == PY_INT) ? py_as_int(*N) : 4096;
-  int64_t k = (K->tag == PY_INT) ? py_as_int(*K) : 768;
-  int64_t iters = (iterations->tag == PY_INT) ? py_as_int(*iterations) : 100;
+  int64_t m = (M->tag == lite::kInt) ? as_int(*M) : 1024;
+  int64_t n = (N->tag == lite::kInt) ? as_int(*N) : 4096;
+  int64_t k = (K->tag == lite::kInt) ? as_int(*K) : 768;
+  int64_t iters = (iterations->tag == lite::kInt) ? as_int(*iterations) : 100;
 
   // 估算性能指标
   double flopsPerIter = 2.0 * static_cast<double>(m) * static_cast<double>(n) * static_cast<double>(k);
@@ -659,7 +659,7 @@ extern "C" PyValue py_fusion_benchmark(const PyValue *kernelCode,
     "  \"peak_tflops\": %.1f,\n"
     "  \"efficiency\": \"%.0f%%\"\n"
     "}",
-    py_str_data(kernelName),
+    str_data(kernelName),
     m, n, k, iters,
     totalFlops / 1e9,
     actualTimeMs,
@@ -667,5 +667,5 @@ extern "C" PyValue py_fusion_benchmark(const PyValue *kernelCode,
     peakTflops,
     efficiency * 100);
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }

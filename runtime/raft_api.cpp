@@ -16,7 +16,7 @@ extern "C" {
 
 // raft.build(config_json) → 返回节点 ID 字符串
 // config_json 格式: {"node_id":"...","bind_addr":"...","cluster_secret":"...","peers":[...],"data_dir":"..."}
-PyValue py_raft_build(const char *config_json, int64_t jsonLen) {
+lite::Value raft_build(const char *config_json, int64_t jsonLen) {
     std::string json(config_json, jsonLen);
 
     // 简单 JSON 解析（生产环境应使用完整 JSON 库）
@@ -75,30 +75,30 @@ PyValue py_raft_build(const char *config_json, int64_t jsonLen) {
     extract_int("heartbeat_interval_ms", config.heartbeat_interval_ms);
 
     if (config.node_id.empty()) {
-        return py_str_new("{\"error\":\"node_id is required\"}", 27);
+        return str_new("{\"error\":\"node_id is required\"}", 27);
     }
 
     int64_t bt_ = raftTraceNowMs();
     RaftNode* node = RaftNode::build(config);
-    if (py_trace_enabled()) py_trace_op("raft", "build", config.node_id.c_str(), node ? 1 : 0, raftTraceNowMs() - bt_);
+    if (trace_enabled()) trace_op("raft", "build", config.node_id.c_str(), node ? 1 : 0, raftTraceNowMs() - bt_);
     if (!node) {
-        return py_str_new("{\"error\":\"build failed\"}", 22);
+        return str_new("{\"error\":\"build failed\"}", 22);
     }
 
     std::string result = "{\"node_id\":\"" + config.node_id + "\",\"status\":\"created\"}";
-    return py_str_new(result.c_str(), result.size());
+    return str_new(result.c_str(), result.size());
 }
 
 // raft.erase(node_id) → 删除节点
-PyValue py_raft_erase(const char *node_id, int64_t idLen) {
+lite::Value raft_erase(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
     RaftNode::erase(id);
     std::string result = "{\"status\":\"erased\",\"node_id\":\"" + id + "\"}";
-    return py_str_new(result.c_str(), result.size());
+    return str_new(result.c_str(), result.size());
 }
 
 // raft.status(node_id) → 返回节点状态 JSON
-PyValue py_raft_status(const char *node_id, int64_t idLen) {
+lite::Value raft_status(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
     auto st = RaftNode::status(id);
 
@@ -121,11 +121,11 @@ PyValue py_raft_status(const char *node_id, int64_t idLen) {
     json << "]}";
 
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // raft.list_nodes() → 返回所有节点 ID 列表 JSON
-PyValue py_raft_list_nodes() {
+lite::Value raft_list_nodes() {
     auto ids = RaftNode::list_nodes();
     std::ostringstream json;
     json << "[";
@@ -135,7 +135,7 @@ PyValue py_raft_list_nodes() {
     }
     json << "]";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // ============================================================================
@@ -143,7 +143,7 @@ PyValue py_raft_list_nodes() {
 // ============================================================================
 
 // raft.add(node_id, cmd_type, payload) → 提交命令到集群
-PyValue py_raft_add(const char *node_id, int64_t idLen,
+lite::Value raft_add(const char *node_id, int64_t idLen,
                     const char *cmd_type, int64_t typeLen,
                     const char *payload, int64_t payloadLen) {
     std::string id(node_id, idLen);
@@ -154,15 +154,15 @@ PyValue py_raft_add(const char *node_id, int64_t idLen,
     std::lock_guard<std::mutex> lk(g_nodes_mutex);
     auto it = g_nodes.find(id);
     if (it == g_nodes.end()) {
-        return py_str_new("{\"error\":\"node not found\"}", 26);
+        return str_new("{\"error\":\"node not found\"}", 26);
     }
 
     std::string result = it->second->propose(type, pl);
-    return py_str_new(result.c_str(), result.size());
+    return str_new(result.c_str(), result.size());
 }
 
 // raft.register_handler(node_id, cmd_type) → 注册命令处理器（返回成功标志）
-int64_t py_raft_register_handler(const char *node_id, int64_t idLen,
+int64_t raft_register_handler(const char *node_id, int64_t idLen,
                                   const char *cmd_type, int64_t typeLen) {
     std::string id(node_id, idLen);
     std::string type(cmd_type, typeLen);
@@ -191,7 +191,7 @@ int64_t py_raft_register_handler(const char *node_id, int64_t idLen,
 // ============================================================================
 
 // raft.register_node(node_id, role, addr) → 注册节点角色
-PyValue py_raft_register_node(const char *node_id, int64_t idLen,
+lite::Value raft_register_node(const char *node_id, int64_t idLen,
                                const char *role, int64_t roleLen,
                                const char *addr, int64_t addrLen) {
     std::string id(node_id, idLen);
@@ -201,22 +201,22 @@ PyValue py_raft_register_node(const char *node_id, int64_t idLen,
     std::lock_guard<std::mutex> lk(g_nodes_mutex);
     auto it = g_nodes.find(id);
     if (it == g_nodes.end()) {
-        return py_str_new("{\"error\":\"node not found\"}", 26);
+        return str_new("{\"error\":\"node not found\"}", 26);
     }
 
     it->second->register_node_role(r, a);
     std::string result = "{\"status\":\"registered\",\"node\":\"" + a + "\",\"role\":\"" + r + "\"}";
-    return py_str_new(result.c_str(), result.size());
+    return str_new(result.c_str(), result.size());
 }
 
 // raft.cluster_nodes(node_id) → 返回集群节点列表 JSON
-PyValue py_raft_cluster_nodes(const char *node_id, int64_t idLen) {
+lite::Value raft_cluster_nodes(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
 
     std::lock_guard<std::mutex> lk(g_nodes_mutex);
     auto it = g_nodes.find(id);
     if (it == g_nodes.end()) {
-        return py_str_new("[]", 2);
+        return str_new("[]", 2);
     }
 
     auto nodes = it->second->get_cluster_nodes();
@@ -234,11 +234,11 @@ PyValue py_raft_cluster_nodes(const char *node_id, int64_t idLen) {
     }
     json << "]";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // raft.mount_storage(node_id, name, path) → 注册共享存储
-PyValue py_raft_mount_storage(const char *node_id, int64_t idLen,
+lite::Value raft_mount_storage(const char *node_id, int64_t idLen,
                                const char *name, int64_t nameLen,
                                const char *path, int64_t pathLen) {
     std::string id(node_id, idLen);
@@ -248,12 +248,12 @@ PyValue py_raft_mount_storage(const char *node_id, int64_t idLen,
     std::lock_guard<std::mutex> lk(g_nodes_mutex);
     auto it = g_nodes.find(id);
     if (it == g_nodes.end()) {
-        return py_str_new("{\"error\":\"node not found\"}", 26);
+        return str_new("{\"error\":\"node not found\"}", 26);
     }
 
     it->second->mount_storage(n, p);
     std::string result = "{\"status\":\"mounted\",\"name\":\"" + n + "\",\"path\":\"" + p + "\"}";
-    return py_str_new(result.c_str(), result.size());
+    return str_new(result.c_str(), result.size());
 }
 
 // ============================================================================
@@ -261,7 +261,7 @@ PyValue py_raft_mount_storage(const char *node_id, int64_t idLen,
 // ============================================================================
 
 // raft.plugin_load(node_id, name, so_path) → 加载插件
-PyValue py_raft_plugin_load(const char *node_id, int64_t idLen,
+lite::Value raft_plugin_load(const char *node_id, int64_t idLen,
                              const char *name, int64_t nameLen,
                              const char *so_path, int64_t pathLen) {
     std::string id(node_id, idLen);
@@ -271,18 +271,18 @@ PyValue py_raft_plugin_load(const char *node_id, int64_t idLen,
     std::lock_guard<std::mutex> lk(g_nodes_mutex);
     auto it = g_nodes.find(id);
     if (it == g_nodes.end()) {
-        return py_str_new("{\"error\":\"node not found\"}", 26);
+        return str_new("{\"error\":\"node not found\"}", 26);
     }
 
     bool ok = it->second->load_plugin(n, p);
     std::string result = ok
         ? "{\"status\":\"loaded\",\"name\":\"" + n + "\"}"
         : "{\"error\":\"load failed\"}";
-    return py_str_new(result.c_str(), result.size());
+    return str_new(result.c_str(), result.size());
 }
 
 // raft.plugin_unload(node_id, name) → 卸载插件
-PyValue py_raft_plugin_unload(const char *node_id, int64_t idLen,
+lite::Value raft_plugin_unload(const char *node_id, int64_t idLen,
                                const char *name, int64_t nameLen) {
     std::string id(node_id, idLen);
     std::string n(name, nameLen);
@@ -290,24 +290,24 @@ PyValue py_raft_plugin_unload(const char *node_id, int64_t idLen,
     std::lock_guard<std::mutex> lk(g_nodes_mutex);
     auto it = g_nodes.find(id);
     if (it == g_nodes.end()) {
-        return py_str_new("{\"error\":\"node not found\"}", 26);
+        return str_new("{\"error\":\"node not found\"}", 26);
     }
 
     bool ok = it->second->unload_plugin(n);
     std::string result = ok
         ? "{\"status\":\"unloaded\",\"name\":\"" + n + "\"}"
         : "{\"error\":\"plugin not found\"}";
-    return py_str_new(result.c_str(), result.size());
+    return str_new(result.c_str(), result.size());
 }
 
 // raft.plugin_list(node_id) → 列出已加载插件
-PyValue py_raft_plugin_list(const char *node_id, int64_t idLen) {
+lite::Value raft_plugin_list(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
 
     std::lock_guard<std::mutex> lk(g_nodes_mutex);
     auto it = g_nodes.find(id);
     if (it == g_nodes.end()) {
-        return py_str_new("[]", 2);
+        return str_new("[]", 2);
     }
 
     auto plugins = it->second->list_plugins();
@@ -324,7 +324,7 @@ PyValue py_raft_plugin_list(const char *node_id, int64_t idLen) {
     }
     json << "]";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 }  // extern "C"
@@ -339,7 +339,7 @@ PyValue py_raft_plugin_list(const char *node_id, int64_t idLen) {
 static std::map<std::string, std::queue<std::string>> g_inbox;
 static std::mutex g_inbox_mutex;
 
-extern "C" PyValue py_raft_leader_info(const char *node_id, int64_t idLen) {
+extern "C" lite::Value raft_leader_info(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
     auto st = RaftNode::status(id);
     std::ostringstream json;
@@ -352,10 +352,10 @@ extern "C" PyValue py_raft_leader_info(const char *node_id, int64_t idLen) {
     json << "\"term\":" << st.term;
     json << "}";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
-extern "C" PyValue py_raft_send(const char *node_id, int64_t idLen,
+extern "C" lite::Value raft_send(const char *node_id, int64_t idLen,
                      const char *msg, int64_t msgLen) {
     std::string id(node_id, idLen);
     std::string m(msg, msgLen);
@@ -364,10 +364,10 @@ extern "C" PyValue py_raft_send(const char *node_id, int64_t idLen,
         g_inbox[id].push(m);
     }
     std::string r = "{\"status\":\"queued\",\"node\":\"" + id + "\"}";
-    return py_str_new(r.c_str(), r.size());
+    return str_new(r.c_str(), r.size());
 }
 
-extern "C" PyValue py_raft_recv(const char *node_id, int64_t idLen) {
+extern "C" lite::Value raft_recv(const char *node_id, int64_t idLen) {
     std::string id(node_id, idLen);
     std::string m;
     {
@@ -378,5 +378,5 @@ extern "C" PyValue py_raft_recv(const char *node_id, int64_t idLen) {
             it->second.pop();
         }
     }
-    return py_str_new(m.c_str(), m.size());
+    return str_new(m.c_str(), m.size());
 }

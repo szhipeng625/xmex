@@ -10,7 +10,7 @@ extern "C" {
 // ============================================================================
 
 // 返回 CPU 统计信息的 JSON 字符串
-PyValue py_sysmon_cpu_stats() {
+lite::Value sysmon_cpu_stats() {
     auto stats = read_cpu_stats();
     std::ostringstream json;
     json << "{";
@@ -32,11 +32,11 @@ PyValue py_sysmon_cpu_stats() {
     }
     json << "]}";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // 获取指定进程的 CPU 使用时间（毫秒）
-int64_t py_sysmon_process_cpu_ms(int64_t pid) {
+int64_t sysmon_process_cpu_ms(int64_t pid) {
     return static_cast<int64_t>(read_process_cpu_percent(static_cast<pid_t>(pid)));
 }
 
@@ -45,7 +45,7 @@ int64_t py_sysmon_process_cpu_ms(int64_t pid) {
 // ============================================================================
 
 // 返回系统内存信息的 JSON 字符串
-PyValue py_sysmon_mem_info() {
+lite::Value sysmon_mem_info() {
     auto info = read_mem_info();
     std::ostringstream json;
     json << "{";
@@ -59,17 +59,17 @@ PyValue py_sysmon_mem_info() {
     json << "\"usage_percent\":" << info.usage_percent;
     json << "}";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // 获取指定进程的内存使用（RSS，KB）
-int64_t py_sysmon_process_mem_kb(int64_t pid) {
+int64_t sysmon_process_mem_kb(int64_t pid) {
     auto info = read_process_mem(static_cast<pid_t>(pid));
     return static_cast<int64_t>(info.vm_rss_kb);
 }
 
 // 获取指定进程的详细内存信息 JSON
-PyValue py_sysmon_process_mem_info(int64_t pid) {
+lite::Value sysmon_process_mem_info(int64_t pid) {
     auto info = read_process_mem(static_cast<pid_t>(pid));
     std::ostringstream json;
     json << "{";
@@ -80,7 +80,7 @@ PyValue py_sysmon_process_mem_info(int64_t pid) {
     json << "\"vm_stack_kb\":" << info.vm_stack_kb;
     json << "}";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // ============================================================================
@@ -88,7 +88,7 @@ PyValue py_sysmon_process_mem_info(int64_t pid) {
 // ============================================================================
 
 // 获取所有进程 PID 列表（JSON 数组）
-PyValue py_sysmon_list_processes() {
+lite::Value sysmon_list_processes() {
     auto pids = list_processes();
     std::ostringstream json;
     json << "[";
@@ -98,11 +98,11 @@ PyValue py_sysmon_list_processes() {
     }
     json << "]";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // 获取指定进程的详细信息 JSON
-PyValue py_sysmon_process_info(int64_t pid) {
+lite::Value sysmon_process_info(int64_t pid) {
     auto info = read_process_info(static_cast<pid_t>(pid));
     std::ostringstream json;
     json << "{";
@@ -120,11 +120,11 @@ PyValue py_sysmon_process_info(int64_t pid) {
     }
     json << "]}";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // 获取进程树的总资源用量 JSON
-PyValue py_sysmon_tree_usage(int64_t root_pid) {
+lite::Value sysmon_tree_usage(int64_t root_pid) {
     auto usage = read_tree_usage(static_cast<pid_t>(root_pid));
     std::ostringstream json;
     json << "{";
@@ -133,7 +133,7 @@ PyValue py_sysmon_tree_usage(int64_t root_pid) {
     json << "\"total_pids\":" << usage.total_pids;
     json << "}";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // ============================================================================
@@ -141,7 +141,7 @@ PyValue py_sysmon_tree_usage(int64_t root_pid) {
 // ============================================================================
 
 // 返回网络接口统计 JSON
-PyValue py_sysmon_net_stats() {
+lite::Value sysmon_net_stats() {
     auto devs = read_net_stats();
     std::ostringstream json;
     json << "[";
@@ -157,7 +157,7 @@ PyValue py_sysmon_net_stats() {
     }
     json << "]";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // ============================================================================
@@ -165,7 +165,7 @@ PyValue py_sysmon_net_stats() {
 // ============================================================================
 
 // 返回文件系统配额 JSON
-PyValue py_sysmon_fs_quota(const char *path, int64_t pathLen) {
+lite::Value sysmon_fs_quota(const char *path, int64_t pathLen) {
     std::string p(path, pathLen);
     auto quota = read_fs_quota(p);
     std::ostringstream json;
@@ -179,17 +179,17 @@ PyValue py_sysmon_fs_quota(const char *path, int64_t pathLen) {
     json << "\"usage_percent\":" << quota.usage_percent;
     json << "}";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // 返回目录总大小（字节）
-int64_t py_sysmon_dir_size(const char *path, int64_t pathLen) {
+int64_t sysmon_dir_size(const char *path, int64_t pathLen) {
     std::string p(path, pathLen);
     return static_cast<int64_t>(dir_total_size(p));
 }
 
 // 返回目录文件数量
-int64_t py_sysmon_dir_file_count(const char *path, int64_t pathLen) {
+int64_t sysmon_dir_file_count(const char *path, int64_t pathLen) {
     std::string p(path, pathLen);
     return dir_file_count(p);
 }
@@ -199,7 +199,7 @@ int64_t py_sysmon_dir_file_count(const char *path, int64_t pathLen) {
 // ============================================================================
 
 // 返回系统信息 JSON
-PyValue py_sysmon_sys_info() {
+lite::Value sysmon_sys_info() {
     auto info = read_sys_info();
     std::ostringstream json;
     json << "{";
@@ -211,11 +211,11 @@ PyValue py_sysmon_sys_info() {
     json << "\"total_mem_kb\":" << info.total_mem_kb;
     json << "}";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // 返回系统负载
-PyValue py_sysmon_load_avg() {
+lite::Value sysmon_load_avg() {
     std::ostringstream json;
     json << "{";
     json << "\"load_1min\":" << read_load_avg_1min() << ",";
@@ -223,7 +223,7 @@ PyValue py_sysmon_load_avg() {
     json << "\"load_15min\":" << read_load_avg_15min();
     json << "}";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 }  // extern "C"

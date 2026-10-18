@@ -80,16 +80,16 @@ int jsonGetIntVal(const char *json, const char *key) {
 
 // tokenizer_load(path: str) -> str
 // 加载 tokenizer.json 文件。
-extern "C" PyValue py_tokenizer_load(const PyValue *path) {
-  if (path->tag != PY_STR) {
-    py_runtime_error("tokenizer_load() 需要一个字符串参数: path");
+extern "C" lite::Value tokenizer_load(const lite::Value *path) {
+  if (path->tag != lite::kStr) {
+    runtime_error("tokenizer_load() 需要一个字符串参数: path");
   }
 
-  const char *p = py_str_data(path);
+  const char *p = str_data(path);
 
   // 读取文件
   FILE *fp = fopen(p, "r");
-  if (!fp) py_runtime_error("无法打开 tokenizer 文件");
+  if (!fp) runtime_error("无法打开 tokenizer 文件");
 
   fseek(fp, 0, SEEK_END);
   long fsize = ftell(fp);
@@ -100,7 +100,7 @@ extern "C" PyValue py_tokenizer_load(const PyValue *path) {
                         ? static_cast<size_t>(fsize)
                         : 2 * 1024 * 1024;
   char *json = static_cast<char *>(malloc(readSize + 1));
-  if (!json) { fclose(fp); py_runtime_error("内存不足"); }
+  if (!json) { fclose(fp); runtime_error("内存不足"); }
   fread(json, 1, readSize, fp);
   json[readSize] = '\0';
   fclose(fp);
@@ -221,7 +221,7 @@ extern "C" PyValue py_tokenizer_load(const PyValue *path) {
     g_tokenizer.vocabSize, g_tokenizer.addedTokens.size(),
     g_tokenizer.bosTokenId, g_tokenizer.eosTokenId);
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // ===========================================================================
@@ -232,17 +232,17 @@ extern "C" PyValue py_tokenizer_load(const PyValue *path) {
 // 将文本编码为 token ID 列表（JSON 数组格式）。
 //
 // 使用简单的 BPE 分词：从长到短匹配 vocab 中的 token。
-extern "C" PyValue py_tokenizer_encode(const PyValue *text) {
+extern "C" lite::Value tokenizer_encode(const lite::Value *text) {
   if (!g_tokenizer.loaded) {
-    py_runtime_error("tokenizer 未加载，请先调用 tokenizer_load()");
+    runtime_error("tokenizer 未加载，请先调用 tokenizer_load()");
   }
 
-  if (text->tag != PY_STR) {
-    py_runtime_error("tokenizer_encode() 需要一个字符串参数: text");
+  if (text->tag != lite::kStr) {
+    runtime_error("tokenizer_encode() 需要一个字符串参数: text");
   }
 
-  const char *t = py_str_data(text);
-  int64_t tLen = py_str_size(text);
+  const char *t = str_data(text);
+  int64_t tLen = str_size(text);
   std::string input(t, static_cast<size_t>(tLen));
 
   std::vector<int> tokens;
@@ -301,7 +301,7 @@ extern "C" PyValue py_tokenizer_encode(const PyValue *text) {
   }
   result += "]";
 
-  return py_str_new(result.c_str(), static_cast<int64_t>(result.size()));
+  return str_new(result.c_str(), static_cast<int64_t>(result.size()));
 }
 
 // ===========================================================================
@@ -310,16 +310,16 @@ extern "C" PyValue py_tokenizer_encode(const PyValue *text) {
 
 // tokenizer_decode(token_ids: str) -> str
 // 将 token ID 列表（JSON 数组）解码为文本。
-extern "C" PyValue py_tokenizer_decode(const PyValue *tokenIds) {
+extern "C" lite::Value tokenizer_decode(const lite::Value *tokenIds) {
   if (!g_tokenizer.loaded) {
-    py_runtime_error("tokenizer 未加载，请先调用 tokenizer_load()");
+    runtime_error("tokenizer 未加载，请先调用 tokenizer_load()");
   }
 
-  if (tokenIds->tag != PY_STR) {
-    py_runtime_error("tokenizer_decode() 需要一个字符串参数: token_ids (JSON 数组)");
+  if (tokenIds->tag != lite::kStr) {
+    runtime_error("tokenizer_decode() 需要一个字符串参数: token_ids (JSON 数组)");
   }
 
-  const char *ids = py_str_data(tokenIds);
+  const char *ids = str_data(tokenIds);
   std::string result;
 
   // 简单解析 JSON 数组
@@ -347,7 +347,7 @@ extern "C" PyValue py_tokenizer_decode(const PyValue *tokenIds) {
     }
   }
 
-  return py_str_new(result.c_str(), static_cast<int64_t>(result.size()));
+  return str_new(result.c_str(), static_cast<int64_t>(result.size()));
 }
 
 // ===========================================================================
@@ -356,9 +356,9 @@ extern "C" PyValue py_tokenizer_decode(const PyValue *tokenIds) {
 
 // tokenizer_info() -> str
 // 返回 tokenizer 的详细信息。
-extern "C" PyValue py_tokenizer_info() {
+extern "C" lite::Value tokenizer_info() {
   if (!g_tokenizer.loaded) {
-    py_runtime_error("tokenizer 未加载");
+    runtime_error("tokenizer 未加载");
   }
 
   char buf[1024];
@@ -384,5 +384,5 @@ extern "C" PyValue py_tokenizer_info() {
   }
   snprintf(buf + pos, sizeof(buf) - static_cast<size_t>(pos), "]\n}");
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }

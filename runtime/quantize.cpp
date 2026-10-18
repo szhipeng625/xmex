@@ -105,17 +105,17 @@ float dequantizeValue(const uint32_t *int4Weights, const float *scales,
 //   例如: [{"name":"q_proj","rows":5120,"cols":5120}, ...]
 //
 // 返回量化后的配置和预估大小。
-extern "C" PyValue py_quantize_fp16_to_awq(const PyValue *weightsJson,
-                                             const PyValue *bits,
-                                             const PyValue *groupSize) {
-  if (weightsJson->tag != PY_STR) {
-    py_runtime_error("quantize_fp16_to_awq() 需要字符串参数: weights_json");
+extern "C" lite::Value quantize_fp16_to_awq(const lite::Value *weightsJson,
+                                             const lite::Value *bits,
+                                             const lite::Value *groupSize) {
+  if (weightsJson->tag != lite::kStr) {
+    runtime_error("quantize_fp16_to_awq() 需要字符串参数: weights_json");
   }
 
-  int b = (bits->tag == PY_INT) ? static_cast<int>(py_as_int(*bits)) : 4;
-  int gs = (groupSize->tag == PY_INT) ? static_cast<int>(py_as_int(*groupSize)) : 128;
+  int b = (bits->tag == lite::kInt) ? static_cast<int>(as_int(*bits)) : 4;
+  int gs = (groupSize->tag == lite::kInt) ? static_cast<int>(as_int(*groupSize)) : 128;
 
-  const char *wj = py_str_data(weightsJson);
+  const char *wj = str_data(weightsJson);
 
   // 计算量化后的模型大小
   double totalFp16Bytes = 0;
@@ -172,7 +172,7 @@ extern "C" PyValue py_quantize_fp16_to_awq(const PyValue *weightsJson,
     (totalFp16Bytes - totalAwqBytes) / (1024.0 * 1024.0 * 1024.0),
     (1.0 - totalAwqBytes / std::max(totalFp16Bytes, 1.0)) * 100.0);
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // ===========================================================================
@@ -183,12 +183,12 @@ extern "C" PyValue py_quantize_fp16_to_awq(const PyValue *weightsJson,
 // 返回指定架构的完整配置模板。
 //
 // 支持的架构: qwen2, llama3, mistral, deepseek
-extern "C" PyValue py_quantize_arch_template(const PyValue *archName) {
-  if (archName->tag != PY_STR) {
-    py_runtime_error("quantize_arch_template() 需要一个字符串参数: arch_name");
+extern "C" lite::Value quantize_arch_template(const lite::Value *archName) {
+  if (archName->tag != lite::kStr) {
+    runtime_error("quantize_arch_template() 需要一个字符串参数: arch_name");
   }
 
-  const char *name = py_str_data(archName);
+  const char *name = str_data(archName);
   const char *config = nullptr;
 
   if (strcmp(name, "qwen2") == 0 || strcmp(name, "Qwen2") == 0) {
@@ -295,10 +295,10 @@ extern "C" PyValue py_quantize_arch_template(const PyValue *archName) {
   }
 })CONFIG";
   } else {
-    py_runtime_error("不支持的架构。可用: qwen2, llama3, mistral, deepseek");
+    runtime_error("不支持的架构。可用: qwen2, llama3, mistral, deepseek");
   }
 
-  return py_str_new(config, static_cast<int64_t>(strlen(config)));
+  return str_new(config, static_cast<int64_t>(strlen(config)));
 }
 
 // ===========================================================================
@@ -307,10 +307,10 @@ extern "C" PyValue py_quantize_arch_template(const PyValue *archName) {
 
 // quantize_verify_precision(fp16_values: str, awq_values: str) -> str
 // 验证量化精度，计算 MSE 和最大误差。
-extern "C" PyValue py_quantize_verify_precision(const PyValue *fp16Values,
-                                                 const PyValue *awqValues) {
-  if (fp16Values->tag != PY_STR || awqValues->tag != PY_STR) {
-    py_runtime_error("quantize_verify_precision() 需要两个字符串参数");
+extern "C" lite::Value quantize_verify_precision(const lite::Value *fp16Values,
+                                                 const lite::Value *awqValues) {
+  if (fp16Values->tag != lite::kStr || awqValues->tag != lite::kStr) {
+    runtime_error("quantize_verify_precision() 需要两个字符串参数");
   }
 
   // 简化实现：返回精度估算
@@ -325,7 +325,7 @@ extern "C" PyValue py_quantize_verify_precision(const PyValue *fp16Values,
     "  \"note\": \"AWQ 4-bit 量化在大多数 LLM 上精度损失可忽略\"\n"
     "}");
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // ===========================================================================
@@ -334,18 +334,18 @@ extern "C" PyValue py_quantize_verify_precision(const PyValue *fp16Values,
 
 // quantize_model_info(model_path: str) -> str
 // 分析已有模型的量化信息。
-extern "C" PyValue py_quantize_model_info(const PyValue *modelPath) {
-  if (modelPath->tag != PY_STR) {
-    py_runtime_error("quantize_model_info() 需要一个字符串参数: model_path");
+extern "C" lite::Value quantize_model_info(const lite::Value *modelPath) {
+  if (modelPath->tag != lite::kStr) {
+    runtime_error("quantize_model_info() 需要一个字符串参数: model_path");
   }
 
-  const char *mp = py_str_data(modelPath);
+  const char *mp = str_data(modelPath);
 
   // 检查是否存在量化配置文件
   std::string configPath = std::string(mp) + "/config.json";
   FILE *fp = fopen(configPath.c_str(), "r");
   if (!fp) {
-    py_runtime_error("无法打开模型配置文件");
+    runtime_error("无法打开模型配置文件");
   }
 
   fseek(fp, 0, SEEK_END);
@@ -353,7 +353,7 @@ extern "C" PyValue py_quantize_model_info(const PyValue *modelPath) {
   fseek(fp, 0, SEEK_SET);
 
   char *json = static_cast<char *>(malloc(static_cast<size_t>(fsize) + 1));
-  if (!json) { fclose(fp); py_runtime_error("内存不足"); }
+  if (!json) { fclose(fp); runtime_error("内存不足"); }
   fread(json, 1, static_cast<size_t>(fsize), fp);
   json[fsize] = '\0';
   fclose(fp);
@@ -381,5 +381,5 @@ extern "C" PyValue py_quantize_model_info(const PyValue *modelPath) {
     bits,
     isQuantized ? 16.0 / bits : 1.0);
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }

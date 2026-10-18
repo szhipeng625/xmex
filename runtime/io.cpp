@@ -1,7 +1,7 @@
 // 输入输出。
 //
-// py_print 收的是 PyValue 数组的指针 —— 聚合体本身不跨 ABI 边界按值传,
-// 但"指向数组的指针"没问题,元素在内存里按 PyValue 布局排列。
+// print_ 收的是 lite::Value 数组的指针 —— 聚合体本身不跨 ABI 边界按值传,
+// 但"指向数组的指针"没问题,元素在内存里按 lite::Value 布局排列。
 #include "pylite/runtime.h"
 
 #include <cstdio>
@@ -10,12 +10,12 @@
 
 namespace {
 
-// 输出的目的地。同一套渲染代码要服务两个调用方:py_print 写 stdout、
-// py_repr 拼成一个字符串。早先它们各自实现一遍的写法在加入列表/字典之后
+// 输出的目的地。同一套渲染代码要服务两个调用方:print_ 写 stdout、
+// repr 拼成一个字符串。早先它们各自实现一遍的写法在加入列表/字典之后
 // 会立刻变成两份要同步维护的递归打印代码,所以这里先抽出这个 sink。
 struct Sink {
   std::FILE *f = nullptr;   // 非空则写文件
-  char *buf = nullptr;      // 非空则写内存(由 py_gc_alloc 分配,SCAN_NONE)
+  char *buf = nullptr;      // 非空则写内存(由 gc_alloc 分配,SCAN_NONE)
   size_t len = 0;
   size_t cap = 0;
 };
@@ -28,7 +28,7 @@ void sinkPut(Sink &s, const char *p, size_t n) {
   if (s.len + n > s.cap) {
     size_t cap = s.cap ? s.cap : 64;
     while (cap < s.len + n) cap *= 2;
-    auto *buf = static_cast<char *>(py_gc_alloc(cap, PY_GC_SCAN_NONE));
+    auto *buf = static_cast<char *>(gc_alloc(cap, lite::kScanNone));
     std::memcpy(buf, s.buf, s.len);
     s.buf = buf;
     s.cap = cap;
@@ -57,13 +57,13 @@ void printDouble(Sink &s, double d) {
   sinkPuts(s, buf);
 }
 
-void writeRepr(Sink &s, PyValue v);
+void writeRepr(Sink &s, lite::Value v);
 
 // 字符串的 repr:带引号并转义。引号的选择与 Python 一致 ——
 // 默认单引号,若内容含单引号而不含双引号则改用双引号,少一层转义。
-void writeStrRepr(Sink &s, PyValue v) {
-  const char *data = py_str_data(&v);
-  const int64_t n = py_str_size(&v);
+void writeStrRepr(Sink &s, lite::Value v) {
+  const char *data = str_data(&v);
+  const int64_t n = str_size(&v);
 
   bool hasSingle = false, hasDouble = false;
   for (int64_t i = 0; i < n; ++i) {
@@ -97,72 +97,72 @@ void writeStrRepr(Sink &s, PyValue v) {
 
 // 容器内部的元素一律用 repr —— 所以 print(["hi"]) 是 ['hi'] 而不是 [hi],
 // 而顶层的 print("hi") 不带引号。这正是 Python 的 str/repr 之分。
-void writeRepr(Sink &s, PyValue v) {
+void writeRepr(Sink &s, lite::Value v) {
   switch (v.tag) {
-    case PY_NULL:
+    case lite::kNull:
       sinkPuts(s, "None");
       break;
-    case PY_BOOL:
+    case lite::kBool:
       sinkPuts(s, v.as.i ? "True" : "False");
       break;
-    case PY_INT: {
+    case lite::kInt: {
       char buf[32];
       std::snprintf(buf, sizeof(buf), "%lld", static_cast<long long>(v.as.i));
       sinkPuts(s, buf);
       break;
     }
-    case PY_FLOAT:
+    case lite::kFloat:
       printDouble(s, v.as.f);
       break;
-    case PY_STR:
+    case lite::kStr:
       writeStrRepr(s, v);
       break;
-    case PY_LIST: {
-      const int64_t n = py_list_len(&v);
+    case lite::kList: {
+      const int64_t n = list_len(&v);
       sinkPutc(s, '[');
       for (int64_t i = 0; i < n; ++i) {
         if (i) sinkPuts(s, ", ");
-        writeRepr(s, py_list_get(&v, i));
+        writeRepr(s, list_get(&v, i));
       }
       sinkPutc(s, ']');
       break;
     }
-    case PY_TUPLE: {
-      const int64_t n = py_tuple_len(&v);
+    case lite::kTuple: {
+      const int64_t n = tuple_len(&v);
       sinkPutc(s, '(');
       for (int64_t i = 0; i < n; ++i) {
         if (i) sinkPuts(s, ", ");
-        writeRepr(s, py_tuple_get(&v, i));
+        writeRepr(s, tuple_get(&v, i));
       }
       // 单元素元组要写成 (x,),与 Python 一致
       if (n == 1) sinkPutc(s, ',');
       sinkPutc(s, ')');
       break;
     }
-    case PY_DICT: {
-      const int64_t n = py_dict_len(&v);
+    case lite::kDict: {
+      const int64_t n = dict_len(&v);
       sinkPutc(s, '{');
       for (int64_t i = 0; i < n; ++i) {
         if (i) sinkPuts(s, ", ");
-        writeRepr(s, py_dict_key_at(&v, i));
+        writeRepr(s, dict_key_at(&v, i));
         sinkPuts(s, ": ");
-        writeRepr(s, py_dict_val_at(&v, i));
+        writeRepr(s, dict_val_at(&v, i));
       }
       sinkPutc(s, '}');
       break;
     }
     default:
       sinkPuts(s, "<");
-      sinkPuts(s, py_tag_name(v.tag));
+      sinkPuts(s, tag_name(v.tag));
       sinkPuts(s, ">");
       break;
   }
 }
 
 // 顶层用的 str 规则:只有字符串不加引号,其余与 repr 相同。
-void writeStr(Sink &s, PyValue v) {
-  if (v.tag == PY_STR) {
-    sinkPut(s, py_str_data(&v), static_cast<size_t>(py_str_size(&v)));
+void writeStr(Sink &s, lite::Value v) {
+  if (v.tag == lite::kStr) {
+    sinkPut(s, str_data(&v), static_cast<size_t>(str_size(&v)));
     return;
   }
   writeRepr(s, v);
@@ -184,13 +184,13 @@ bool readLine(char *buf, size_t cap) {
 [[noreturn]] void badNumber(const char *what, const char *text) {
   static thread_local char buf[256];
   std::snprintf(buf, sizeof(buf), "输入的不是合法的 %s: '%s'", what, text);
-  py_runtime_error(buf);
+  runtime_error(buf);
 }
 
 }  // namespace
 
 // print(a, b, c) —— 以空格分隔,末尾换行。与 Python 的 print 一致。
-extern "C" void py_print(PyValue *vals, int64_t n) {
+extern "C" void print_(lite::Value *vals, int64_t n) {
   Sink s;
   s.f = stdout;
   for (int64_t i = 0; i < n; ++i) {
@@ -202,10 +202,10 @@ extern "C" void py_print(PyValue *vals, int64_t n) {
 
 // 按 repr 规则渲染成新字符串。字典查不到键时的报错信息要用它,
 // 这样 `d["a"]` 报的是 字典里没有键 'a' 而不是一个裸指针值。
-extern "C" PyValue py_repr(const PyValue *v) {
+extern "C" lite::Value repr(const lite::Value *v) {
   Sink s;
   writeRepr(s, *v);
-  return py_str_new(s.buf, static_cast<int64_t>(s.len));
+  return str_new(s.buf, static_cast<int64_t>(s.len));
 }
 
 // ---------------------------------------------------------------------------
@@ -215,40 +215,40 @@ extern "C" PyValue py_repr(const PyValue *v) {
 // 结果再打包成元组交给多目标赋值去解包。
 // ---------------------------------------------------------------------------
 
-extern "C" PyValue py_read_int() {
+extern "C" lite::Value read_int() {
   char buf[256];
-  if (!readLine(buf, sizeof(buf))) py_runtime_error("读取输入失败(输入已结束)");
+  if (!readLine(buf, sizeof(buf))) runtime_error("读取输入失败(输入已结束)");
   char *end = nullptr;
   const long long v = std::strtoll(buf, &end, 10);
   if (end == buf) badNumber("整数", buf);
-  return py_int(v);
+  return int_(v);
 }
 
-extern "C" PyValue py_read_float() {
+extern "C" lite::Value read_float() {
   char buf[256];
-  if (!readLine(buf, sizeof(buf))) py_runtime_error("读取输入失败(输入已结束)");
+  if (!readLine(buf, sizeof(buf))) runtime_error("读取输入失败(输入已结束)");
   char *end = nullptr;
   const double v = std::strtod(buf, &end);
   if (end == buf) badNumber("浮点数", buf);
-  return py_float(v);
+  return float_(v);
 }
 
-extern "C" PyValue py_read_bool() {
+extern "C" lite::Value read_bool() {
   char buf[256];
-  if (!readLine(buf, sizeof(buf))) py_runtime_error("读取输入失败(输入已结束)");
+  if (!readLine(buf, sizeof(buf))) runtime_error("读取输入失败(输入已结束)");
   if (std::strcmp(buf, "True") == 0 || std::strcmp(buf, "true") == 0 ||
       std::strcmp(buf, "1") == 0) {
-    return py_bool(true);
+    return bool_(true);
   }
   if (std::strcmp(buf, "False") == 0 || std::strcmp(buf, "false") == 0 ||
       std::strcmp(buf, "0") == 0) {
-    return py_bool(false);
+    return bool_(false);
   }
   badNumber("布尔值(应为 True/False)", buf);
 }
 
-extern "C" PyValue py_read_str() {
+extern "C" lite::Value read_str() {
   char buf[1024];
-  if (!readLine(buf, sizeof(buf))) py_runtime_error("读取输入失败(输入已结束)");
-  return py_str_new(buf, static_cast<int64_t>(std::strlen(buf)));
+  if (!readLine(buf, sizeof(buf))) runtime_error("读取输入失败(输入已结束)");
+  return str_new(buf, static_cast<int64_t>(std::strlen(buf)));
 }

@@ -7,13 +7,13 @@
 //   * 只有 str/list/dict/tuple 是堆对象,int/float/bool/None 是内联标量、根本
 //     不分配(见 include/pylite/value.h)。所以堆上全是容器,规模有限。
 //   * 根 = **保守扫描本线程的栈与寄存器**,外加一个显式根栈。
-//     扫栈之所以行得通,靠的是 IRGen 的既有约定:每个 PyValue 都住在栈上的
+//     扫栈之所以行得通,靠的是 IRGen 的既有约定:每个 lite::Value 都住在栈上的
 //     alloca 里,而且槽位地址几乎都会传给 DLL 里的不透明运行时函数 ——
 //     于是 LLVM 的 mem2reg/SROA 提升不掉它们,值必须留在内存里。
-//   * 不为每种容器写 tracer:PyList 的 items、PyDict 的 keys/vals 都是指向**另外
+//   * 不为每种容器写 tracer:lite::List 的 items、lite::Dict 的 keys/vals 都是指向**另外
 //     的块**,保守扫描容器对象就能自动沿指针找到它们。以后加新容器类型不用改这里。
 //
-// ⚠️ 本文件是自举的:GC 内部任何路径都**不得**调用 py_gc_alloc / py_alloc。
+// ⚠️ 本文件是自举的:GC 内部任何路径都**不得**调用 gc_alloc / alloc。
 // 块表、排序索引、标记栈一律用 malloc/realloc。
 #include "pylite/runtime.h"
 
@@ -25,12 +25,12 @@
 namespace {
 
 // 块头放在 payload **前面**。size 与 GCD 都取 16 的倍数对齐后,malloc 返回
-// 16 字节对齐时 payload 必然是 16 字节对齐的 —— PyValue 要求 alignof == 8,
-// 而 PyStr 的 data 紧跟在 int64 之后,所以 16 对齐比最低要求更宽裕。
+// 16 字节对齐时 payload 必然是 16 字节对齐的 —— lite::Value 要求 alignof == 8,
+// 而 lite::Str 的 data 紧跟在 int64 之后,所以 16 对齐比最低要求更宽裕。
 struct alignas(16) GcBlock {
   GcBlock *next;        // 块表(单链表,头插,O(1))
   size_t size;          // payload 字节数(16 对齐后)
-  uint32_t kind;        // PyGcScan
+  uint32_t kind;        // lite::GcScan
   uint32_t mark;        // 标记位
   uint32_t cellOffset;  // SCAN_VALUES 的单元格起始偏移(元组是 8,其余是 0)
   uint32_t refcount;    // 强引用计数(共享指针语义)
@@ -54,7 +54,7 @@ void tablePush(GcBlock *b) {
   if (g_tableLen == g_tableCap) {
     const size_t cap = g_tableCap ? g_tableCap * 2 : 256;
     auto **nt = static_cast<GcBlock **>(std::realloc(g_table, cap * sizeof(GcBlock *)));
-    if (nt == nullptr) py_runtime_error("内存耗尽(GC 块表)");
+    if (nt == nullptr) runtime_error("内存耗尽(GC 块表)");
     g_table = nt;
     g_tableCap = cap;
   }
@@ -101,7 +101,7 @@ void loadOptions() {
     g_opt.threshold = std::strtoll(t, nullptr, 10);
   }
   // 统计要打到进程退出为止,所以注册在这里(第一次分配时)而不是要求调用方
-  // 记得先调 py_gc_init —— 那样太容易漏。
+  // 记得先调 gc_init —— 那样太容易漏。
   if (g_opt.stats) std::atexit(reportAtExit);
 }
 
@@ -121,24 +121,24 @@ void reportAtExit() {
 
 }  // namespace
 
-extern "C" void *py_gc_alloc(size_t n, PyGcScan kind) {
+extern "C" void *gc_alloc(size_t n, lite::GcScan kind) {
   loadOptions();
 
   // ⚠️ 顺序钉死:**先回收、再取块**。反过来的话,刚拿到但还没被任何人引用的
   // 新块会在同一次分配返回前被自己收掉。
   maybeCollect();
 
-  // 16 字节对齐:PyValue 需要 alignof == 8,字符串的 data 紧跟 int64,
+  // 16 字节对齐:lite::Value 需要 alignof == 8,字符串的 data 紧跟 int64,
   // 16 对齐比最低要求更宽裕,也让"指针 16 对齐"这类廉价过滤成为可能。
   const size_t size = (n + 15) & ~static_cast<size_t>(15);
 
-  if (kind == PY_GC_SCAN_VALUES && (size % 16) != 0) {
+  if (kind == lite::kScanValues && (size % 16) != 0) {
     // size 已经向上取整到 16 的倍数,这里只可能在溢出等病态情况下触发
-    py_runtime_error("GC 内部错误:SCAN_VALUES 的长度必须是 16 的倍数");
+    runtime_error("GC 内部错误:SCAN_VALUES 的长度必须是 16 的倍数");
   }
 
   auto *b = static_cast<GcBlock *>(std::malloc(sizeof(GcBlock) + size));
-  if (b == nullptr) py_runtime_error("内存耗尽");
+  if (b == nullptr) runtime_error("内存耗尽");
   b->next = nullptr;
   b->size = size;
   b->kind = static_cast<uint32_t>(kind);
@@ -159,14 +159,14 @@ extern "C" void *py_gc_alloc(size_t n, PyGcScan kind) {
   return reinterpret_cast<char *>(b) + sizeof(GcBlock);
 }
 
-extern "C" void *py_gc_alloc_values(size_t n, size_t firstCellOffset) {
-  // 先按 VALUES 分配再补 cellOffset:py_gc_alloc 只校验长度,
+extern "C" void *gc_alloc_values(size_t n, size_t firstCellOffset) {
+  // 先按 VALUES 分配再补 cellOffset:gc_alloc 只校验长度,
   // 偏移的合法性在这里查,报错信息能带上实际值。
-  void *p = py_gc_alloc(n, PY_GC_SCAN_VALUES);
+  void *p = gc_alloc(n, lite::kScanValues);
 
   const size_t size = (n + 15) & ~static_cast<size_t>(15);
   // 只要求偏移按 8 对齐、且落在块内。**不要求余下的字节正好是整数个单元格**:
-  // 内存已经向上取整到 16,元组(s {int64 len; PyValue items[]})在 n=0 时
+  // 内存已经向上取整到 16,元组(s {int64 len; lite::Value items[]})在 n=0 时
   // size=16、偏移 8,尾部那半个格子是块内的已分配内存,按 tag 读一下无害
   // (tag 判定的方向是"只跳过明确是标量的",最坏也只是多保留)。
   if ((firstCellOffset % 8) != 0 || firstCellOffset > size) {
@@ -174,7 +174,7 @@ extern "C" void *py_gc_alloc_values(size_t n, size_t firstCellOffset) {
     std::snprintf(buf, sizeof(buf),
                   "GC 内部错误:SCAN_VALUES 的单元格偏移 %zu 不合法(块长 %zu)",
                   firstCellOffset, size);
-    py_runtime_error(buf);
+    runtime_error(buf);
   }
 
   // 块头就在 payload 前面,回退一步改掉 cellOffset
@@ -184,14 +184,14 @@ extern "C" void *py_gc_alloc_values(size_t n, size_t firstCellOffset) {
 }
 
 // --- 兼容旧 ABI ---------------------------------------------------------
-// py_alloc / py_arena_reset 是公开头里的历史符号,用户手写 C++ 会直接调,
+// alloc / arena_reset 是公开头里的历史符号,用户手写 C++ 会直接调,
 // 签名不能改(见 include/pylite/runtime.h)。转发时按最保守的方式扫描 ——
 // 宁可多保留,不可漏根。
-extern "C" void *py_alloc(size_t n) {
-  return py_gc_alloc(n, PY_GC_SCAN_WORDS);
+extern "C" void *alloc(size_t n) {
+  return gc_alloc(n, lite::kScanWords);
 }
 // --- 引用计数(共享指针 / 弱指针语义) -----------------------------------
-// 计数位记在**块头**里,对象自身数据布局与 PyValue 布局都不动 —— 不触碰
+// 计数位记在**块头**里,对象自身数据布局与 lite::Value 布局都不动 —— 不触碰
 // ABI 契约,已编译的目标文件不受影响。
 //
 // 生命周期与 std::shared_ptr / std::weak_ptr 对齐:
@@ -229,11 +229,11 @@ void destroyPayload(GcBlock *b) {
   std::memset(reinterpret_cast<char *>(b) + sizeof(GcBlock), 0xDD, b->size);
 }
 }  // namespace
-extern "C" void py_incref(void *payload) {
+extern "C" void incref(void *payload) {
   if (payload == nullptr) return;
   ++blockOf(payload)->refcount;
 }
-extern "C" void py_decref(void *payload) {
+extern "C" void decref(void *payload) {
   if (payload == nullptr) return;
   GcBlock *b = blockOf(payload);
   if (b->refcount == 0) return;   // 未登记强引用,交给标记-清除
@@ -246,11 +246,11 @@ extern "C" void py_decref(void *payload) {
   }
 }
 // 弱引用:只观察对象存活,不影响其生命周期
-extern "C" void py_weakref(void *payload) {
+extern "C" void weakref(void *payload) {
   if (payload == nullptr) return;
   ++blockOf(payload)->weakcount;
 }
-extern "C" void py_weak_release(void *payload) {
+extern "C" void weak_release(void *payload) {
   if (payload == nullptr) return;
   GcBlock *b = blockOf(payload);
   if (b->weakcount == 0) return;
@@ -260,7 +260,7 @@ extern "C" void py_weak_release(void *payload) {
 }
 // 弱引用升级为强引用:对象已失效返回 0,否则加引用并返回 1。
 // 绝不返回悬空指针 —— 要么拿到有效对象,要么明确失败。
-extern "C" int32_t py_weak_upgrade(void *payload) {
+extern "C" int32_t weak_upgrade(void *payload) {
   if (payload == nullptr) return 0;
   GcBlock *b = blockOf(payload);
   if (b->destroyed || b->refcount == 0) return 0;
@@ -268,13 +268,13 @@ extern "C" int32_t py_weak_upgrade(void *payload) {
   return 1;
 }
 // 弱引用是否仍指向活对象
-extern "C" int32_t py_weak_alive(void *payload) {
+extern "C" int32_t weak_alive(void *payload) {
   if (payload == nullptr) return 0;
   GcBlock *b = blockOf(payload);
   return (b->destroyed == 0 && b->refcount > 0) ? 1 : 0;
 }
 // 读取强引用计数(供内建函数与测试使用)
-extern "C" int64_t py_refcount(void *payload) {
+extern "C" int64_t refcount(void *payload) {
   if (payload == nullptr) return 0;
   return blockOf(payload)->refcount;
 }
@@ -310,7 +310,7 @@ void buildSpans() {
   if (g_tableLen > g_spanCap) {
     const size_t cap = g_tableLen * 2;
     auto *ns = static_cast<Span *>(std::realloc(g_spans, cap * sizeof(Span)));
-    if (ns == nullptr) py_runtime_error("内存耗尽(GC 区间表)");
+    if (ns == nullptr) runtime_error("内存耗尽(GC 区间表)");
     g_spans = ns;
     g_spanCap = cap;
   }
@@ -346,7 +346,7 @@ void workPush(GcBlock *b) {
   if (g_workLen == g_workCap) {
     const size_t cap = g_workCap ? g_workCap * 2 : 256;
     auto **nw = static_cast<GcBlock **>(std::realloc(g_work, cap * sizeof(GcBlock *)));
-    if (nw == nullptr) py_runtime_error("内存耗尽(GC 标记栈)");
+    if (nw == nullptr) runtime_error("内存耗尽(GC 标记栈)");
     g_work = nw;
     g_workCap = cap;
   }
@@ -443,12 +443,12 @@ void drainWorklist() {
     const char *p = reinterpret_cast<const char *>(blk) + sizeof(GcBlock);
     const size_t size = blk->size;
 
-    switch (static_cast<PyGcScan>(blk->kind)) {
-      case PY_GC_SCAN_NONE:
+    switch (static_cast<lite::GcScan>(blk->kind)) {
+      case lite::kScanNone:
         // 纯字节缓冲(字符串内容、临时 char 缓冲),里面不可能有指针
         break;
 
-      case PY_GC_SCAN_WORDS:
+      case lite::kScanWords:
         // 保守逐字:容器对象头靠这条照到 items / keys / vals 三个指针。
         // 不需要为每种容器写 tracer —— 指针指向的那个块会继续被扫。
         for (size_t off = 0; off + 8 <= size; off += 8) {
@@ -458,18 +458,18 @@ void drainWorklist() {
         }
         break;
 
-      case PY_GC_SCAN_VALUES:
-        // 按 PyValue 单元格走,tag 决定要不要跟随 payload。
+      case lite::kScanValues:
+        // 按 lite::Value 单元格走,tag 决定要不要跟随 payload。
         //
-        // ⚠️ 判定方向:只把**明确是标量**的 tag(PY_NULL/PY_BOOL/PY_INT/
-        // PY_FLOAT,即 0..3)跳过,其余(含非法 tag、含未初始化的垃圾)一律跟随。
+        // ⚠️ 判定方向:只把**明确是标量**的 tag(lite::kNull/lite::kBool/lite::kInt/
+        // lite::kFloat,即 0..3)跳过,其余(含非法 tag、含未初始化的垃圾)一律跟随。
         // 反过来的"只跟随 4 种指针类型"一旦漏一种就是 use-after-free;
         // 这个方向最坏只是多保留。负数 tag 强转成无符号会变成大数 → 不跳过,
         // 正是安全的那一侧。
         for (size_t off = blk->cellOffset; off + 16 <= size; off += 16) {
           int32_t tag;
           std::memcpy(&tag, p + off, 4);
-          if (static_cast<uint32_t>(tag) <= static_cast<uint32_t>(PY_FLOAT)) continue;
+          if (static_cast<uint32_t>(tag) <= static_cast<uint32_t>(lite::kFloat)) continue;
           uintptr_t w;
           std::memcpy(&w, p + off + 8, 8);
           markCandidate(w);
@@ -535,12 +535,12 @@ void maybeCollect() {
   if (g_opt.off || g_inCollect) return;
   if (g_tableLen == 0) return;  // 空堆没什么可收
   if (g_sinceGc < currentThreshold()) return;
-  py_gc_collect();
+  gc_collect();
 }
 
 }  // namespace
 
-extern "C" void py_gc_collect() {
+extern "C" void gc_collect() {
   loadOptions();
   if (g_inCollect) return;   // 防重入:回收期间不做嵌套回收
   g_inCollect = true;
@@ -566,13 +566,13 @@ extern "C" void py_gc_collect() {
   g_inCollect = false;
 }
 
-extern "C" void py_arena_reset() {
+extern "C" void arena_reset() {
   // 原本是给 REPL 用的"整块丢弃"。语义改成"强制回收一次":
   // 在 GC 下"丢弃全部内存"是做不到的 —— 栈上还有活着的引用。
-  py_gc_collect();
+  gc_collect();
 }
 
-extern "C" void py_gc_stats(PyGcStats *out) {
+extern "C" void gc_stats(lite::GcStats *out) {
   if (out == nullptr) return;
   out->alloc_bytes_total = g_allocBytes;
   out->freed_bytes_total = g_freedBytes;
@@ -584,21 +584,21 @@ extern "C" void py_gc_stats(PyGcStats *out) {
   out->disabled = g_opt.off ? 1 : 0;
 }
 
-extern "C" void py_gc_root_push(void **slot) {
+extern "C" void gc_root_push(void **slot) {
   if (g_rootLen == g_rootCap) {
     const size_t cap = g_rootCap ? g_rootCap * 2 : 32;
     auto **nr = static_cast<void **>(std::realloc(g_roots, cap * sizeof(void *)));
-    if (nr == nullptr) py_runtime_error("内存耗尽(GC 根栈)");
+    if (nr == nullptr) runtime_error("内存耗尽(GC 根栈)");
     g_roots = nr;
     g_rootCap = cap;
   }
   g_roots[g_rootLen++] = slot;
 }
 
-extern "C" void py_gc_root_pop(size_t n) {
+extern "C" void gc_root_pop(size_t n) {
   // 只减不释放:根栈的上限很小(运行时里同时活着的裸指针不超过十个),
   // 留着复用比反复 realloc 划算。
   g_rootLen -= (n <= g_rootLen) ? n : g_rootLen;
 }
 
-extern "C" void py_gc_init() { loadOptions(); }
+extern "C" void gc_init() { loadOptions(); }

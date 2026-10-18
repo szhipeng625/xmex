@@ -17,19 +17,19 @@ namespace {
 
 // 把运算符映射到运行时函数名。返回 nullptr 表示不是简单的一元/二元运算。
 const char *runtimeForBinOp(const std::string &op) {
-  if (op == "+")  return "py_add";
-  if (op == "-")  return "py_sub";
-  if (op == "*")  return "py_mul";
-  if (op == "/")  return "py_div";
-  if (op == "//") return "py_floordiv";
-  if (op == "%")  return "py_mod";
-  if (op == "**") return "py_pow";
-  if (op == "==") return "py_eq";
-  if (op == "!=") return "py_ne";
-  if (op == "<")  return "py_lt";
-  if (op == "<=") return "py_le";
-  if (op == ">")  return "py_gt";
-  if (op == ">=") return "py_ge";
+  if (op == "+")  return "add";
+  if (op == "-")  return "sub";
+  if (op == "*")  return "mul";
+  if (op == "/")  return "div_";
+  if (op == "//") return "floordiv";
+  if (op == "%")  return "mod_";
+  if (op == "**") return "pow_";
+  if (op == "==") return "eq";
+  if (op == "!=") return "ne";
+  if (op == "<")  return "lt";
+  if (op == "<=") return "le";
+  if (op == ">")  return "gt";
+  if (op == ">=") return "ge";
   return nullptr;
 }
 
@@ -94,7 +94,7 @@ AllocaInst *IRGen::declareVar(const std::string &name) {
 // ---------------------------------------------------------------------------
 // 表达式
 //
-// 全部返回"指向 PyValue 槽位的指针"。
+// 全部返回"指向 lite::Value 槽位的指针"。
 // ---------------------------------------------------------------------------
 
 Value *IRGen::genExpr(const Expr *e) {
@@ -120,12 +120,12 @@ Value *IRGen::genExpr(const Expr *e) {
     return s;
   }
   if (auto *x = dynamic_cast<const StringLit *>(e)) {
-    // 字节放在一个模块级常量里,长度显式传给 py_str_new。
+    // 字节放在一个模块级常量里,长度显式传给 str_new。
     // ⚠️ 必须用带长度的 StringRef,不能图省事走 .c_str() ——
     // 词法层把 "\0" 解码成了真正的 NUL 字节(lexer.cpp),按 C 字符串处理会
     // 在那里截断,而且 StringRef 从 std::string 构造本就是拿 data()/size()。
     llvm::GlobalVariable *bytes = B_.CreateGlobalString(llvm::StringRef(x->value));
-    return abi_.callPtrI64(B_, "py_str_new", bytes,
+    return abi_.callPtrI64(B_, "str_new", bytes,
                            B_.getInt64(static_cast<int64_t>(x->value.size())));
   }
 
@@ -164,9 +164,9 @@ Value *IRGen::genExpr(const Expr *e) {
 // ---------------------------------------------------------------------------
 
 void IRGen::storeElement(Value *array, size_t i, Value *slot) {
-  // 只能用**单索引**的 GEP。写成 {0, i} 是错的:源类型 %PyValue 是结构体,
+  // 只能用**单索引**的 GEP。写成 {0, i} 是错的:源类型 %lite::Value 是结构体,
   // 第二个索引会被解释成"结构体的第几个字段",而不是数组的第几个元素。
-  // 单索引形式按 sizeof(%PyValue) 步进,正是数组取址要的语义。
+  // 单索引形式按 sizeof(%lite::Value) 步进,正是数组取址要的语义。
   Value *elem = B_.CreateGEP(abi_.valueTy(), array,
                              B_.getInt64(static_cast<uint64_t>(i)), "elem.ptr");
   B_.CreateStore(B_.CreateLoad(abi_.valueTy(), slot), elem);
@@ -194,20 +194,20 @@ Value *IRGen::noneSlot() {
 // `a, b = b, a` 那种"写目标会覆盖读取来源"的问题。
 Value *IRGen::genTupleLit(const TupleLit *e) {
   Value *arr = evalToArray(e->items, "tuple.vals");
-  return abi_.callPtrI64(B_, "py_tuple_new", arr,
+  return abi_.callPtrI64(B_, "tuple_new", arr,
                          B_.getInt64(static_cast<uint64_t>(e->items.size())));
 }
 
 Value *IRGen::genListLit(const ListLit *e) {
   Value *arr = evalToArray(e->items, "list.vals");
-  return abi_.callPtrI64(B_, "py_list_new", arr,
+  return abi_.callPtrI64(B_, "list_new", arr,
                          B_.getInt64(static_cast<uint64_t>(e->items.size())));
 }
 
 Value *IRGen::genDictLit(const DictLit *e) {
   const size_t n = e->items.size();
 
-  // py_dict_new 收的是**两条平行数组**(键一条、值一条),不是交错的。
+  // dict_new 收的是**两条平行数组**(键一条、值一条),不是交错的。
   // 空指针分别要单独申请:元素个数为 0 时两块指针都是空。
   Value *keys = ConstantPointerNull::get(cast<PointerType>(abi_.ptrTy()));
   Value *vals = keys;
@@ -220,7 +220,7 @@ Value *IRGen::genDictLit(const DictLit *e) {
     }
   }
 
-  return abi_.callN(B_, "py_dict_new", {abi_.ptrTy(), abi_.ptrTy(), abi_.i64Ty()},
+  return abi_.callN(B_, "dict_new", {abi_.ptrTy(), abi_.ptrTy(), abi_.i64Ty()},
                     {keys, vals, B_.getInt64(static_cast<uint64_t>(n))});
 }
 
@@ -229,7 +229,7 @@ Value *IRGen::genDictLit(const DictLit *e) {
 Value *IRGen::genSubscript(const Subscript *e) {
   Value *obj = genExpr(e->obj.get());
   Value *idx = genExpr(e->index.get());
-  return abi_.callN(B_, "py_index", {abi_.ptrTy(), abi_.ptrTy()}, {obj, idx});
+  return abi_.callN(B_, "index_", {abi_.ptrTy(), abi_.ptrTy()}, {obj, idx});
 }
 
 // 切片。省略的边界传 None 槽位,由运行时按默认值处理 ——
@@ -240,7 +240,7 @@ Value *IRGen::genSlice(const SliceExpr *e) {
   Value *hi = e->hi ? genExpr(e->hi.get()) : noneSlot();
   Value *step = e->step ? genExpr(e->step.get()) : noneSlot();
   return abi_.callN(
-      B_, "py_slice",
+      B_, "slice",
       {abi_.ptrTy(), abi_.ptrTy(), abi_.ptrTy(), abi_.ptrTy()},
       {obj, lo, hi, step});
 }
@@ -288,18 +288,18 @@ Value *IRGen::genAndOr(const BinOp *e, bool isAnd) {
 
 Value *IRGen::genUnaryOp(const UnaryOp *e) {
   if (e->op == "-") {
-    return abi_.callUnary(B_, "py_neg", genExpr(e->operand.get()));
+    return abi_.callUnary(B_, "neg", genExpr(e->operand.get()));
   }
   if (e->op == "not") {
-    return abi_.callUnary(B_, "py_not", genExpr(e->operand.get()));
+    return abi_.callUnary(B_, "not_", genExpr(e->operand.get()));
   }
   irError(e->line, e->col, "无法生成代码:不支持的一元运算符 '" + e->op + "'");
 }
 
 // len(x) —— 内建。运行时按 tag 分派到字符串/列表/字典/元组。
 //
-// py_len 返回的是 i64 而不是 PyValue,这里负责装箱。不把 py_len 的返回类型
-// 定成 PyValue 是有意的:for 循环的条件要直接拿它跟下标比 i64;而且同一个
+// len 返回的是 i64 而不是 lite::Value,这里负责装箱。不把 len 的返回类型
+// 定成 lite::Value 是有意的:for 循环的条件要直接拿它跟下标比 i64;而且同一个
 // 符号名如果出现两种签名,Abi 的按名字缓存会静默配错 FunctionType。
 Value *IRGen::genLen(const Call *e) {
   if (e->args.size() != 1) {
@@ -308,7 +308,7 @@ Value *IRGen::genLen(const Call *e) {
   }
   Value *v = genExpr(e->args[0].get());
   Value *slot = abi_.newSlot(B_, "len");
-  abi_.storeI64AsInt(B_, slot, abi_.callUnaryI64(B_, "py_len", v));
+  abi_.storeI64AsInt(B_, slot, abi_.callUnaryI64(B_, "len", v));
   return slot;
 }
 
@@ -322,7 +322,7 @@ Value *IRGen::genGcCollect(const Call *e) {
     irError(e->line, e->col,
             "gc_collect() 不接受参数,给了 " + std::to_string(e->args.size()) + " 个");
   }
-  abi_.callVoidN(B_, "py_gc_collect", {}, {});
+  abi_.callVoidN(B_, "gc_collect", {}, {});
   return noneSlot();
 }
 
@@ -334,8 +334,8 @@ Value *IRGen::genSleepMs(const Call *e) {
             "sleep_ms() 需要 1 个参数,给了 " + std::to_string(e->args.size()) + " 个");
   }
   Value *v = genExpr(e->args[0].get());
-  Value *ms = abi_.callUnaryI64(B_, "py_to_int", v);
-  abi_.callVoidN(B_, "py_sleep_ms", {abi_.i64Ty()}, {ms});
+  Value *ms = abi_.callUnaryI64(B_, "to_int", v);
+  abi_.callVoidN(B_, "sleep_ms", {abi_.i64Ty()}, {ms});
   return noneSlot();
 }
 
@@ -346,14 +346,14 @@ Value *IRGen::genTimeMs(const Call *e) {
     irError(e->line, e->col,
             "time_ms() 不接受参数,给了 " + std::to_string(e->args.size()) + " 个");
   }
-  return abi_.callNullary(B_, "py_time_ms");
+  return abi_.callNullary(B_, "time_ms");
 }
 Value *IRGen::genTimeS(const Call *e) {
   if (!e->args.empty()) {
     irError(e->line, e->col,
             "time_s() 不接受参数,给了 " + std::to_string(e->args.size()) + " 个");
   }
-  return abi_.callNullary(B_, "py_time_s");
+  return abi_.callNullary(B_, "time_s");
 }
 
 // obj.method(args) —— 走运行时的统一分派入口。
@@ -406,7 +406,7 @@ Value *IRGen::genMethodCall(const Call *e, const Attribute *attr) {
 
   GlobalVariable *name = B_.CreateGlobalString(llvm::StringRef(attr->name));
   return abi_.callN(
-      B_, "py_call_method",
+      B_, "call_method",
       {abi_.ptrTy(), abi_.ptrTy(), abi_.i64Ty(), abi_.ptrTy(), abi_.i64Ty()},
       {obj, name, B_.getInt64(static_cast<int64_t>(attr->name.size())), args,
        B_.getInt64(static_cast<int64_t>(e->args.size()))});
@@ -417,188 +417,188 @@ Value *IRGen::genMethodCall(const Call *e, const Attribute *attr) {
 static const char *builtinModulePrefix(const std::string &mod, const std::string &fn) {
   // Docker 模块
   if (mod == "docker") {
-    if (fn == "run") return "py_docker_run";
-    if (fn == "ps") return "py_docker_ps";
-    if (fn == "stop") return "py_docker_stop";
-    if (fn == "logs") return "py_docker_logs";
-    if (fn == "pull") return "py_docker_pull";
-    if (fn == "generate_dockerfile") return "py_docker_generate_dockerfile";
-    if (fn == "build") return "py_docker_build";
-    if (fn == "push") return "py_docker_push";
-    if (fn == "project_package") return "py_docker_project_package";
+    if (fn == "run") return "docker_run";
+    if (fn == "ps") return "docker_ps";
+    if (fn == "stop") return "docker_stop";
+    if (fn == "logs") return "docker_logs";
+    if (fn == "pull") return "docker_pull";
+    if (fn == "generate_dockerfile") return "docker_generate_dockerfile";
+    if (fn == "build") return "docker_build";
+    if (fn == "push") return "docker_push";
+    if (fn == "project_package") return "docker_project_package";
   }
   // LLM 模块
   if (mod == "llm") {
-    if (fn == "chat") return "py_llm_chat";
-    if (fn == "create_network") return "py_llm_create_network";
-    if (fn == "add_layer") return "py_llm_add_layer";
-    if (fn == "network_summary") return "py_llm_network_summary";
-    if (fn == "create_dataset") return "py_llm_create_dataset";
-    if (fn == "upload_file") return "py_llm_upload_file";
-    if (fn == "create_finetune") return "py_llm_create_finetune";
-    if (fn == "finetune_status") return "py_llm_finetune_status";
-    if (fn == "list_finetunes") return "py_llm_list_finetunes";
+    if (fn == "chat") return "llm_chat";
+    if (fn == "create_network") return "llm_create_network";
+    if (fn == "add_layer") return "llm_add_layer";
+    if (fn == "network_summary") return "llm_network_summary";
+    if (fn == "create_dataset") return "llm_create_dataset";
+    if (fn == "upload_file") return "llm_upload_file";
+    if (fn == "create_finetune") return "llm_create_finetune";
+    if (fn == "finetune_status") return "llm_finetune_status";
+    if (fn == "list_finetunes") return "llm_list_finetunes";
   }
   // CUDA 模块
   if (mod == "cuda") {
-    if (fn == "info") return "py_cuda_info";
-    if (fn == "compile_ptx") return "py_cuda_compile_ptx";
-    if (fn == "launch_kernel") return "py_cuda_launch_kernel";
-    if (fn == "alloc") return "py_cuda_alloc";
-    if (fn == "free") return "py_cuda_free";
-    if (fn == "memcpy_to_device") return "py_cuda_memcpy_to_device";
-    if (fn == "memcpy_from_device") return "py_cuda_memcpy_from_device";
+    if (fn == "info") return "cuda_info";
+    if (fn == "compile_ptx") return "cuda_compile_ptx";
+    if (fn == "launch_kernel") return "cuda_launch_kernel";
+    if (fn == "alloc") return "cuda_alloc";
+    if (fn == "free") return "cuda_free";
+    if (fn == "memcpy_to_device") return "cuda_memcpy_to_device";
+    if (fn == "memcpy_from_device") return "cuda_memcpy_from_device";
   }
   // Fusion 模块
   if (mod == "fusion") {
-    if (fn == "create_graph") return "py_fusion_create_graph";
-    if (fn == "add_op") return "py_fusion_add_op";
-    if (fn == "apply_rules") return "py_fusion_apply_rules";
-    if (fn == "generate_kernel") return "py_fusion_generate_kernel";
-    if (fn == "autotune") return "py_fusion_autotune";
-    if (fn == "compile_and_run") return "py_fusion_compile_and_run";
-    if (fn == "benchmark") return "py_fusion_benchmark";
+    if (fn == "create_graph") return "fusion_create_graph";
+    if (fn == "add_op") return "fusion_add_op";
+    if (fn == "apply_rules") return "fusion_apply_rules";
+    if (fn == "generate_kernel") return "fusion_generate_kernel";
+    if (fn == "autotune") return "fusion_autotune";
+    if (fn == "compile_and_run") return "fusion_compile_and_run";
+    if (fn == "benchmark") return "fusion_benchmark";
   }
   // Inference 模块
   if (mod == "inference") {
-    if (fn == "load_model") return "py_inference_load_model";
-    if (fn == "generate") return "py_inference_generate";
-    if (fn == "kv_cache_stats") return "py_inference_kv_cache_stats";
-    if (fn == "flash_attention_kernel") return "py_inference_flash_attention_kernel";
-    if (fn == "multi_gpu_info") return "py_inference_multi_gpu_info";
-    if (fn == "profile") return "py_inference_profile";
-    if (fn == "unload") return "py_inference_unload";
+    if (fn == "load_model") return "inference_load_model";
+    if (fn == "generate") return "inference_generate";
+    if (fn == "kv_cache_stats") return "inference_kv_cache_stats";
+    if (fn == "flash_attention_kernel") return "inference_flash_attention_kernel";
+    if (fn == "multi_gpu_info") return "inference_multi_gpu_info";
+    if (fn == "profile") return "inference_profile";
+    if (fn == "unload") return "inference_unload";
   }
   // Tokenizer 模块
   if (mod == "tokenizer") {
-    if (fn == "load") return "py_tokenizer_load";
-    if (fn == "encode") return "py_tokenizer_encode";
-    if (fn == "decode") return "py_tokenizer_decode";
-    if (fn == "info") return "py_tokenizer_info";
+    if (fn == "load") return "tokenizer_load";
+    if (fn == "encode") return "tokenizer_encode";
+    if (fn == "decode") return "tokenizer_decode";
+    if (fn == "info") return "tokenizer_info";
   }
   // Server 模块
   if (mod == "server") {
-    if (fn == "start") return "py_server_start";
-    if (fn == "stop") return "py_server_stop";
-    if (fn == "status") return "py_server_status";
-    if (fn == "config") return "py_server_config";
-    if (fn == "tls") return "py_server_tls";
+    if (fn == "start") return "server_start";
+    if (fn == "stop") return "server_stop";
+    if (fn == "status") return "server_status";
+    if (fn == "config") return "server_config";
+    if (fn == "tls") return "server_tls";
   }
   // Quantize 模块
   if (mod == "quantize") {
-    if (fn == "fp16_to_awq") return "py_quantize_fp16_to_awq";
-    if (fn == "arch_template") return "py_quantize_arch_template";
-    if (fn == "verify_precision") return "py_quantize_verify_precision";
-    if (fn == "model_info") return "py_quantize_model_info";
+    if (fn == "fp16_to_awq") return "quantize_fp16_to_awq";
+    if (fn == "arch_template") return "quantize_arch_template";
+    if (fn == "verify_precision") return "quantize_verify_precision";
+    if (fn == "model_info") return "quantize_model_info";
   }
   // Plugin 模块
   if (mod == "plugin") {
-    if (fn == "scan") return "py_plugin_scan";
-    if (fn == "register") return "py_plugin_register";
-    if (fn == "call") return "py_plugin_call";
-    if (fn == "list") return "py_plugin_list";
+    if (fn == "scan") return "plugin_scan";
+    if (fn == "register") return "plugin_register";
+    if (fn == "call") return "plugin_call";
+    if (fn == "list") return "plugin_list";
   }
   // Engine 模块
   if (mod == "engine") {
-    if (fn == "init") return "py_engine_init";
-    if (fn == "add_request") return "py_engine_add_request";
-    if (fn == "step") return "py_engine_step";
-    if (fn == "status") return "py_engine_status";
-    if (fn == "reset") return "py_engine_reset";
-    if (fn == "serve") return "py_engine_serve";
+    if (fn == "init") return "engine_init";
+    if (fn == "add_request") return "engine_add_request";
+    if (fn == "step") return "engine_step";
+    if (fn == "status") return "engine_status";
+    if (fn == "reset") return "engine_reset";
+    if (fn == "serve") return "engine_serve";
   }
   // Sandbox 判题沙箱模块
   if (mod == "sandbox") {
-    if (fn == "create") return "py_sandbox_create";
-    if (fn == "set_cpu_limit") return "py_sandbox_set_cpu_limit_v";
-    if (fn == "set_mem_limit") return "py_sandbox_set_mem_limit_v";
-    if (fn == "set_max_pids") return "py_sandbox_set_max_pids_v";
-    if (fn == "set_no_seccomp") return "py_sandbox_set_no_seccomp_v";
-    if (fn == "set_work_dir") return "py_sandbox_set_work_dir_v";
-    if (fn == "set_binary") return "py_sandbox_set_binary_v";
-    if (fn == "add_arg") return "py_sandbox_add_arg_v";
-    if (fn == "set_stdin") return "py_sandbox_set_stdin_v";
-    if (fn == "set_stdout") return "py_sandbox_set_stdout_v";
-    if (fn == "set_stderr") return "py_sandbox_set_stderr_v";
-    if (fn == "exec") return "py_sandbox_exec_v";
-    if (fn == "destroy") return "py_sandbox_destroy_v";
+    if (fn == "create") return "sandbox_create";
+    if (fn == "set_cpu_limit") return "sandbox_set_cpu_limit_v";
+    if (fn == "set_mem_limit") return "sandbox_set_mem_limit_v";
+    if (fn == "set_max_pids") return "sandbox_set_max_pids_v";
+    if (fn == "set_no_seccomp") return "sandbox_set_no_seccomp_v";
+    if (fn == "set_work_dir") return "sandbox_set_work_dir_v";
+    if (fn == "set_binary") return "sandbox_set_binary_v";
+    if (fn == "add_arg") return "sandbox_add_arg_v";
+    if (fn == "set_stdin") return "sandbox_set_stdin_v";
+    if (fn == "set_stdout") return "sandbox_set_stdout_v";
+    if (fn == "set_stderr") return "sandbox_set_stderr_v";
+    if (fn == "exec") return "sandbox_exec_v";
+    if (fn == "destroy") return "sandbox_destroy_v";
   }
-  // Raft 分布式共识模块（通过 _v 适配器接收 PyValue* 参数）
+  // Raft 分布式共识模块（通过 _v 适配器接收 lite::Value* 参数）
   if (mod == "raft") {
-    if (fn == "build") return "py_raft_build_v";
-    if (fn == "erase") return "py_raft_erase_v";
-    if (fn == "status") return "py_raft_status_v";
-    if (fn == "list_nodes") return "py_raft_list_nodes_v";
-    if (fn == "add") return "py_raft_add_v";
-    if (fn == "register_handler") return "py_raft_register_handler_v";
-    if (fn == "register_node") return "py_raft_register_node_v";
-    if (fn == "cluster_nodes") return "py_raft_cluster_nodes_v";
-    if (fn == "mount_storage") return "py_raft_mount_storage_v";
-    if (fn == "plugin_load") return "py_raft_plugin_load_v";
-    if (fn == "plugin_unload") return "py_raft_plugin_unload_v";
-    if (fn == "plugin_list") return "py_raft_plugin_list_v";
-    if (fn == "leader_info") return "py_raft_leader_info_v";
-    if (fn == "send") return "py_raft_send_v";
-    if (fn == "recv") return "py_raft_recv_v";
+    if (fn == "build") return "raft_build_v";
+    if (fn == "erase") return "raft_erase_v";
+    if (fn == "status") return "raft_status_v";
+    if (fn == "list_nodes") return "raft_list_nodes_v";
+    if (fn == "add") return "raft_add_v";
+    if (fn == "register_handler") return "raft_register_handler_v";
+    if (fn == "register_node") return "raft_register_node_v";
+    if (fn == "cluster_nodes") return "raft_cluster_nodes_v";
+    if (fn == "mount_storage") return "raft_mount_storage_v";
+    if (fn == "plugin_load") return "raft_plugin_load_v";
+    if (fn == "plugin_unload") return "raft_plugin_unload_v";
+    if (fn == "plugin_list") return "raft_plugin_list_v";
+    if (fn == "leader_info") return "raft_leader_info_v";
+    if (fn == "send") return "raft_send_v";
+    if (fn == "recv") return "raft_recv_v";
   }
-  // Cluster 集群管理模块（通过 _v 适配器接收 PyValue* 参数）
+  // Cluster 集群管理模块（通过 _v 适配器接收 lite::Value* 参数）
   if (mod == "cluster") {
-    if (fn == "connect") return "py_cluster_connect_v";
-    if (fn == "disconnect") return "py_cluster_disconnect_v";
-    if (fn == "list") return "py_cluster_list_v";
-    if (fn == "is_connected") return "py_cluster_is_connected_v";
-    if (fn == "status") return "py_cluster_status_v";
-    if (fn == "nodes") return "py_cluster_nodes_v";
-    if (fn == "health") return "py_cluster_health_v";
-    if (fn == "exec") return "py_cluster_exec_v";
-    if (fn == "query") return "py_cluster_query_v";
-    if (fn == "broadcast") return "py_cluster_broadcast_v";
-    if (fn == "health_all") return "py_cluster_health_all_v";
+    if (fn == "connect") return "cluster_connect_v";
+    if (fn == "disconnect") return "cluster_disconnect_v";
+    if (fn == "list") return "cluster_list_v";
+    if (fn == "is_connected") return "cluster_is_connected_v";
+    if (fn == "status") return "cluster_status_v";
+    if (fn == "nodes") return "cluster_nodes_v";
+    if (fn == "health") return "cluster_health_v";
+    if (fn == "exec") return "cluster_exec_v";
+    if (fn == "query") return "cluster_query_v";
+    if (fn == "broadcast") return "cluster_broadcast_v";
+    if (fn == "health_all") return "cluster_health_all_v";
   }
-  // KvAdmin 节点生命周期管理模块（通过 _v 适配器接收 PyValue* 参数）
+  // KvAdmin 节点生命周期管理模块（通过 _v 适配器接收 lite::Value* 参数）
   if (mod == "kv") {
-    if (fn == "build") return "py_kv_build_v";
-    if (fn == "add") return "py_kv_add_v";
-    if (fn == "erase") return "py_kv_erase_v";
-    if (fn == "skip") return "py_kv_skip_v";
-    if (fn == "sleep") return "py_kv_sleep_v";
-    if (fn == "wakeup") return "py_kv_wakeup_v";
-    if (fn == "stop") return "py_kv_stop_v";
-    if (fn == "restart") return "py_kv_restart_v";
-    if (fn == "status") return "py_kv_status_v";
-    if (fn == "list") return "py_kv_list_v";
-    if (fn == "alive") return "py_kv_alive_v";
-    if (fn == "persist") return "py_kv_persist_v";
-    if (fn == "bind_sandbox") return "py_kv_bind_sandbox_v";
-    if (fn == "get_sandbox") return "py_kv_get_sandbox_v";
-    if (fn == "unbind_sandbox") return "py_kv_unbind_sandbox_v";
-    if (fn == "add_box") return "py_kv_add_box_v";
-    if (fn == "locate") return "py_kv_locate_v";
-    if (fn == "self") return "py_kv_self_v";
-    if (fn == "iter") return "py_kv_iter_v";
-    if (fn == "next") return "py_kv_iter_next_v";
-    if (fn == "rewind") return "py_kv_iter_rewind_v";
-    if (fn == "iter_destroy") return "py_kv_iter_destroy_v";
-    if (fn == "iter_live") return "py_kv_iter_live_v";
+    if (fn == "build") return "kv_build_v";
+    if (fn == "add") return "kv_add_v";
+    if (fn == "erase") return "kv_erase_v";
+    if (fn == "skip") return "kv_skip_v";
+    if (fn == "sleep") return "kv_sleep_v";
+    if (fn == "wakeup") return "kv_wakeup_v";
+    if (fn == "stop") return "kv_stop_v";
+    if (fn == "restart") return "kv_restart_v";
+    if (fn == "status") return "kv_status_v";
+    if (fn == "list") return "kv_list_v";
+    if (fn == "alive") return "kv_alive_v";
+    if (fn == "persist") return "kv_persist_v";
+    if (fn == "bind_sandbox") return "kv_bind_sandbox_v";
+    if (fn == "get_sandbox") return "kv_get_sandbox_v";
+    if (fn == "unbind_sandbox") return "kv_unbind_sandbox_v";
+    if (fn == "add_box") return "kv_add_box_v";
+    if (fn == "locate") return "kv_locate_v";
+    if (fn == "self") return "kv_self_v";
+    if (fn == "iter") return "kv_iter_v";
+    if (fn == "next") return "kv_iter_next_v";
+    if (fn == "rewind") return "kv_iter_rewind_v";
+    if (fn == "iter_destroy") return "kv_iter_destroy_v";
+    if (fn == "iter_live") return "kv_iter_live_v";
     // 节点内置 MQ 队列方法(2026-10 增补)
-    if (fn == "enqueue") return "py_kv_enqueue_v";
-    if (fn == "dequeue") return "py_kv_dequeue_v";
-    if (fn == "done") return "py_kv_done_v";
-    if (fn == "qlen") return "py_kv_qlen_v";
-    if (fn == "set_quota") return "py_kv_set_quota_v";
-    if (fn == "quota") return "py_kv_quota_v";
-    if (fn == "kset") return "py_kv_kset_v";
-    if (fn == "kget") return "py_kv_kget_v";
+    if (fn == "enqueue") return "kv_enqueue_v";
+    if (fn == "dequeue") return "kv_dequeue_v";
+    if (fn == "done") return "kv_done_v";
+    if (fn == "qlen") return "kv_qlen_v";
+    if (fn == "set_quota") return "kv_set_quota_v";
+    if (fn == "quota") return "kv_quota_v";
+    if (fn == "kset") return "kv_kset_v";
+    if (fn == "kget") return "kv_kget_v";
   }
   // 本地文件操作模块（节点落盘代码供编译,2026-10 增补）
   if (mod == "fio") {
-    if (fn == "write") return "py_file_write_v";
-    if (fn == "read") return "py_file_read_v";
+    if (fn == "write") return "file_write_v";
+    if (fn == "read") return "file_read_v";
   }
   // 字符串转换模块（任务参数解析,2026-10 增补）
   if (mod == "strc") {
-    if (fn == "to_int") return "py_str_to_int_v";
-    if (fn == "to_str") return "py_int_to_str_v";
+    if (fn == "to_int") return "str_to_int_v";
+    if (fn == "to_str") return "int_to_str_v";
   }
   return nullptr;
 }
@@ -665,11 +665,11 @@ void IRGen::bindCallArgs(const std::vector<Param> *params, const Call *e,
     if (!ps[i].isVararg) continue;
     if (extra.empty()) {
       Value *np = ConstantPointerNull::get(cast<PointerType>(abi_.ptrTy()));
-      slots[i] = abi_.callPtrI64(B_, "py_list_new", np, B_.getInt64(0));
+      slots[i] = abi_.callPtrI64(B_, "list_new", np, B_.getInt64(0));
     } else {
       Value *arr = abi_.newSlotArray(B_, static_cast<int64_t>(extra.size()), "varargs");
       for (size_t k = 0; k < extra.size(); ++k) storeElement(arr, k, extra[k]);
-      slots[i] = abi_.callPtrI64(B_, "py_list_new", arr,
+      slots[i] = abi_.callPtrI64(B_, "list_new", arr,
                                 B_.getInt64(static_cast<uint64_t>(extra.size())));
     }
   }
@@ -688,7 +688,7 @@ Value *IRGen::genCall(const Call *e) {
       const char *rtFn = builtinModulePrefix(modName->id, attr->name);
       if (rtFn) {
         // 内置模块调用: 直接映射到运行时函数
-        // 所有参数都是 PyValue* 指针，通过 callN 传递
+        // 所有参数都是 lite::Value* 指针，通过 callN 传递
         std::vector<Value *> argSlots;
         std::vector<Type *> argTypes;
         argSlots.reserve(e->args.size());
@@ -700,9 +700,9 @@ Value *IRGen::genCall(const Call *e) {
         }
 
         // 对于返回 void 的函数（docker_stop, cuda_free, cuda_memcpy_to_device）
-        if (std::string(rtFn) == "py_docker_stop" ||
-            std::string(rtFn) == "py_cuda_free" ||
-            std::string(rtFn) == "py_cuda_memcpy_to_device") {
+        if (std::string(rtFn) == "docker_stop" ||
+            std::string(rtFn) == "cuda_free" ||
+            std::string(rtFn) == "cuda_memcpy_to_device") {
           abi_.callVoidN(B_, rtFn, argTypes, argSlots);
           Value *res = abi_.newSlot(B_, "mod.ret");
           abi_.storeNone(B_, res);
@@ -837,12 +837,12 @@ Value *IRGen::genCall(const Call *e) {
       if (!fd->params[i].isVararg) continue;
       if (extra.empty()) {
         Value *np = ConstantPointerNull::get(cast<PointerType>(abi_.ptrTy()));
-        slots[i] = abi_.callPtrI64(B_, "py_list_new", np, B_.getInt64(0));
+        slots[i] = abi_.callPtrI64(B_, "list_new", np, B_.getInt64(0));
       } else {
         Value *arr =
             abi_.newSlotArray(B_, static_cast<int64_t>(extra.size()), "varargs");
         for (size_t k = 0; k < extra.size(); ++k) storeElement(arr, k, extra[k]);
-        slots[i] = abi_.callPtrI64(B_, "py_list_new", arr,
+        slots[i] = abi_.callPtrI64(B_, "list_new", arr,
                                   B_.getInt64(static_cast<uint64_t>(extra.size())));
       }
     }
@@ -871,10 +871,10 @@ Value *IRGen::genInput(const InputExpr *e) {
   // 否则 `x = input(float)` 会让 x 拿到一个元组而不是那个浮点数。
   auto readerFor = [&](TypeName t) -> const char * {
     switch (t) {
-      case TypeName::Int:   return "py_read_int";
-      case TypeName::Float: return "py_read_float";
-      case TypeName::Bool:  return "py_read_bool";
-      case TypeName::Str:   return "py_read_str";
+      case TypeName::Int:   return "read_int";
+      case TypeName::Float: return "read_float";
+      case TypeName::Bool:  return "read_bool";
+      case TypeName::Str:   return "read_str";
       default: return nullptr;
     }
   };
@@ -884,7 +884,7 @@ Value *IRGen::genInput(const InputExpr *e) {
     return abi_.callNullary(B_, fn);
   }
 
-  // 把各次读取的结果堆进一块连续内存,再交给 py_tuple_new
+  // 把各次读取的结果堆进一块连续内存,再交给 tuple_new
   Value *arr = abi_.newSlotArray(B_, static_cast<int64_t>(n), "input.vals");
 
   for (size_t i = 0; i < n; ++i) {
@@ -893,14 +893,14 @@ Value *IRGen::genInput(const InputExpr *e) {
     storeElement(arr, i, abi_.callNullary(B_, fn));
   }
 
-  return abi_.callPtrI64(B_, "py_tuple_new", arr, B_.getInt64(static_cast<uint64_t>(n)));
+  return abi_.callPtrI64(B_, "tuple_new", arr, B_.getInt64(static_cast<uint64_t>(n)));
 }
 
-// print(a, b, ...) —— 内建。把各参数求值后放进一个 PyValue 数组,
+// print(a, b, ...) —— 内建。把各参数求值后放进一个 lite::Value 数组,
 // 把数组指针交给运行时。数组是内存布局,不受"聚合体不按值传"的限制。
 Value *IRGen::genPrint(const Call *e) {
   const size_t n = e->args.size();
-  // 数组元素个数为 0 时 evalToArray 给空指针,py_print 也不会去读它。
+  // 数组元素个数为 0 时 evalToArray 给空指针,print_ 也不会去读它。
   // 这里曾经有个坑:用 {0, i} 的双索引 GEP 取数组元素是错的(第二个索引会被
   // 当成"结构体的第几个字段"),现在统一由 storeElement 用单索引处理。
   Value *arr = evalToArray(e->args, "print.args");
@@ -977,7 +977,7 @@ void IRGen::genAssign(const Assign *s) {
       Value *obj = genExpr(sub->obj.get());
       Value *idx = genExpr(sub->index.get());
       Value *val = genExpr(s->value.get());
-      abi_.callVoidN(B_, "py_setindex", {abi_.ptrTy(), abi_.ptrTy(), abi_.ptrTy()},
+      abi_.callVoidN(B_, "setindex", {abi_.ptrTy(), abi_.ptrTy(), abi_.ptrTy()},
                      {obj, idx, val});
       return;
     }
@@ -1039,7 +1039,7 @@ void IRGen::genAssign(const Assign *s) {
   // --- 其余情况:右侧求值成一个元组,运行时解包 ---
   //
   // 覆盖 `a, b = f()`(函数多返回值)和 `a, b = input(int, int)`。
-  // 元素个数不匹配由 py_unpack 在运行时给出明确报错。
+  // 元素个数不匹配由 unpack 在运行时给出明确报错。
   Value *tup = genExpr(s->value.get());
   Value *out = abi_.newSlotArray(B_, static_cast<int64_t>(n), "unpack.vals");
   abi_.callUnpack(B_, tup, out, static_cast<int64_t>(n));
@@ -1047,7 +1047,7 @@ void IRGen::genAssign(const Assign *s) {
   std::vector<Value *> slots;
   slots.reserve(n);
   for (size_t i = 0; i < n; ++i) {
-    // out 是 %PyValue 数组,用单索引 GEP 取第 i 个元素
+    // out 是 %lite::Value 数组,用单索引 GEP 取第 i 个元素
     slots.push_back(
         B_.CreateGEP(abi_.valueTy(), out, B_.getInt64(static_cast<uint64_t>(i))));
   }
@@ -1086,11 +1086,11 @@ void IRGen::genAugAssign(const AugAssign *s) {
 
   Value *rhs = genExpr(s->value.get());
 
-  // `+=` 走 py_iadd 而不是 py_add:列表的 `xs += [x]` 必须**就地** extend
+  // `+=` 走 iadd 而不是 add:列表的 `xs += [x]` 必须**就地** extend
   // (别名看得见),与 `xs = xs + [x]` 的重新绑定语义不同 —— 见 runtime/arith.cpp。
-  // 字符串与数值不可变,py_iadd 内部退回 py_add,写回本地槽位即可。
+  // 字符串与数值不可变,iadd 内部退回 add,写回本地槽位即可。
   if (s->op == "+") {
-    Value *result = abi_.callN(B_, "py_iadd", {abi_.ptrTy(), abi_.ptrTy()}, {slot, rhs});
+    Value *result = abi_.callN(B_, "iadd", {abi_.ptrTy(), abi_.ptrTy()}, {slot, rhs});
     abi_.copySlot(B_, slot, result);
     return;
   }
@@ -1172,7 +1172,7 @@ void IRGen::genFor(const For *s) {
   Value *probeSlot = abi_.newSlot(B_, "for.probe");
   abi_.copySlot(B_, probeSlot, probe);
   Value *tag = abi_.loadTag(B_, probeSlot);
-  Value *isInst = B_.CreateICmpEQ(tag, ConstantInt::get(abi_.i32Ty(), PY_INSTANCE), "is.inst");
+  Value *isInst = B_.CreateICmpEQ(tag, ConstantInt::get(abi_.i32Ty(), lite::kInstance), "is.inst");
   Function *fn = curFn_;
   BasicBlock *iterBB = BasicBlock::Create(Ctx_, "for.iterproto", fn);
   BasicBlock *countBB = BasicBlock::Create(Ctx_, "for.count", fn);
@@ -1187,7 +1187,7 @@ void IRGen::genFor(const For *s) {
 
 // for x in <list|str|dict> —— 降成"下标从 0 数到 len"的计数循环。
 //
-// 不构造任何迭代器对象:运行时只需要 py_len 与 py_iter_at 两个原语。
+// 不构造任何迭代器对象:运行时只需要 len 与 iter_at 两个原语。
 // 两个细节是照着 Python 的语义来的:
 //
 //   * 可迭代对象在**循环外**只求值一次,绑进一个临时槽位。循环体里给 xs
@@ -1208,15 +1208,15 @@ void IRGen::genForIterableFromSlot(const For *s, Value *seq, BasicBlock *mergeBB
   B_.SetInsertPoint(condBB);
   PHINode *i = B_.CreatePHI(abi_.i64Ty(), 2, "i");
   i->addIncoming(ConstantInt::get(abi_.i64Ty(), 0), preBB);
-  Value *len = abi_.callUnaryI64(B_, "py_len", seq);
+  Value *len = abi_.callUnaryI64(B_, "len", seq);
   B_.CreateCondBr(B_.CreateICmpSLT(i, len, "for.keep"), bodyBB, exitBB);
 
   B_.SetInsertPoint(bodyBB);
   AllocaInst *ivar = lookupVar(s->var);
   if (!ivar) ivar = declareVar(s->var);
-  // 每轮重新绑定循环变量。py_iter_at 对字典取的是**键**,不是 d[i] 那种按键查找
+  // 每轮重新绑定循环变量。iter_at 对字典取的是**键**,不是 d[i] 那种按键查找
   // (见 runtime/index.cpp 的说明)。
-  abi_.copySlot(B_, ivar, abi_.callPtrI64(B_, "py_iter_at", seq, i));
+  abi_.copySlot(B_, ivar, abi_.callPtrI64(B_, "iter_at", seq, i));
   loops_.push_back({latchBB, exitBB});
   genBlock(s->body);
   loops_.pop_back();
@@ -1245,12 +1245,12 @@ void IRGen::genForIteratorProtocol(const For *s, Value *itObj, BasicBlock *merge
   GlobalVariable *mname = B_.CreateGlobalString("next");
   Value *nullArgs = ConstantPointerNull::get(cast<PointerType>(abi_.ptrTy()));
   Value *item = abi_.callN(
-      B_, "py_call_method",
+      B_, "call_method",
       {abi_.ptrTy(), abi_.ptrTy(), abi_.i64Ty(), abi_.ptrTy(), abi_.i64Ty()},
       {itObj, mname, B_.getInt64(4), nullArgs, B_.getInt64(0)});
   // item 是槽位指针,取 tag 判 None
   Value *tag = abi_.loadTag(B_, item);
-  Value *isNone = B_.CreateICmpEQ(tag, ConstantInt::get(abi_.i32Ty(), PY_NULL), "is.none");
+  Value *isNone = B_.CreateICmpEQ(tag, ConstantInt::get(abi_.i32Ty(), lite::kNull), "is.none");
   B_.CreateCondBr(isNone, exitBB, bodyBB);
   B_.SetInsertPoint(bodyBB);
   AllocaInst *ivar = lookupVar(s->var);
@@ -1279,10 +1279,10 @@ void IRGen::genForRange(const For *s, const RangeExpr *r) {
   Value *stopSlot = genExpr(r->stop.get());
   Value *stepSlot = r->step ? genExpr(r->step.get()) : nullptr;
 
-  Value *startI = startSlot ? abi_.callUnaryI64(B_, "py_to_int", startSlot)
+  Value *startI = startSlot ? abi_.callUnaryI64(B_, "to_int", startSlot)
                             : ConstantInt::get(abi_.i64Ty(), 0);
-  Value *stopI = abi_.callUnaryI64(B_, "py_to_int", stopSlot);
-  Value *stepI = stepSlot ? abi_.callUnaryI64(B_, "py_to_int", stepSlot)
+  Value *stopI = abi_.callUnaryI64(B_, "to_int", stopSlot);
+  Value *stepI = stepSlot ? abi_.callUnaryI64(B_, "to_int", stepSlot)
                           : ConstantInt::get(abi_.i64Ty(), 1);
 
   // 步长为 0 会死循环,先拦下来
@@ -1329,7 +1329,7 @@ void IRGen::genForRange(const For *s, const RangeExpr *r) {
 }
 
 // --- 插桩辅助 ---
-// 这些调用都走 py_trace_*;通信模块未启用时它们是空操作,成本极低。
+// 这些调用都走 trace_*;通信模块未启用时它们是空操作,成本极低。
 void IRGen::traceEnterFn(const std::string &name) {
   if (!traceOn_) return;
   // 帧标识槽位放在入口块最前面,与变量声明同一个约定。
@@ -1339,13 +1339,13 @@ void IRGen::traceEnterFn(const std::string &name) {
     traceFrameSlot_ = tmp.CreateAlloca(abi_.i64Ty(), nullptr, "trace.frame");
   }
   GlobalVariable *gname = B_.CreateGlobalString(llvm::StringRef(name));
-  // py_trace_begin(const char*) -> i64:直接声明 —— callUnaryI64 对非 py_len
-  // 的函数会按 (PyValue)->i64 声明并加载 valueTy,参数类型对不上。
-  Function *beginFn = M_.getFunction("py_trace_begin");
+  // trace_begin(const char*) -> i64:直接声明 —— callUnaryI64 对非 len
+  // 的函数会按 (lite::Value)->i64 声明并加载 valueTy,参数类型对不上。
+  Function *beginFn = M_.getFunction("trace_begin");
   if (beginFn == nullptr) {
     beginFn = Function::Create(
         FunctionType::get(abi_.i64Ty(), {abi_.ptrTy()}, false),
-        Function::ExternalLinkage, "py_trace_begin", M_);
+        Function::ExternalLinkage, "trace_begin", M_);
   }
   Value *id = B_.CreateCall(beginFn, {gname}, "trace.id");
   B_.CreateStore(id, traceFrameSlot_);
@@ -1373,8 +1373,8 @@ void IRGen::traceEnterFnArgs(const std::string &name,
   GlobalVariable *gNameArr = new GlobalVariable(
       M_, nameArrTy, true, GlobalValue::InternalLinkage, nameArr, "trace.argnames");
 
-  // 实参值:栈上指针数组,存放各参数槽位地址(运行时按 PyValue* 取值)。
-  // 注意:运行时接口的最后一参是 PyValue*const*,所以这里传的必须是
+  // 实参值:栈上指针数组,存放各参数槽位地址(运行时按 lite::Value* 取值)。
+  // 注意:运行时接口的最后一参是 lite::Value*const*,所以这里传的必须是
   // 指针数组,不能是把值铺开的数组 —— 否则运行时会把首个值当成地址解引用。
   AllocaInst *valsArr = B_.CreateAlloca(ArrayType::get(abi_.ptrTy(), n),
                                         nullptr, "trace.argptrs");
@@ -1384,11 +1384,11 @@ void IRGen::traceEnterFnArgs(const std::string &name,
     B_.CreateStore(paramSlots[i], elemPtr);
   }
 
-  Function *beginFn = M_.getFunction("py_trace_begin_args");
+  Function *beginFn = M_.getFunction("trace_begin_args");
   if (beginFn == nullptr) {
     beginFn = Function::Create(
         FunctionType::get(abi_.i64Ty(), {ptrTy, abi_.i32Ty(), ptrTy, ptrTy}, false),
-        Function::ExternalLinkage, "py_trace_begin_args", M_);
+        Function::ExternalLinkage, "trace_begin_args", M_);
   }
   GlobalVariable *gname = B_.CreateGlobalString(llvm::StringRef(name));
   Value *id = B_.CreateCall(
@@ -1404,16 +1404,16 @@ void IRGen::traceExitFn(const std::string &name, bool ok) {
   if (traceFrameSlot_->getFunction() != curFn_) return;
   GlobalVariable *gname = B_.CreateGlobalString(llvm::StringRef(name));
   Value *id = B_.CreateLoad(abi_.i64Ty(), traceFrameSlot_);
-  abi_.callVoidN(B_, "py_trace_end",
+  abi_.callVoidN(B_, "trace_end",
                  {abi_.i64Ty(), abi_.ptrTy(), abi_.i32Ty()},
                  {id, gname, B_.getInt32(ok ? 1 : 0)});
 }
 void IRGen::traceVar(const std::string &name, Value *slot) {
   if (!traceOn_) return;
-  // py_trace_var_value(const char*, const PyValue*):由运行时负责 repr 转换,
+  // trace_var_value(const char*, const lite::Value*):由运行时负责 repr 转换,
   // 编译器侧不用关心字符串怎么取、怎么保证 NUL 结尾 —— 全部收敛到这一个入口。
   GlobalVariable *gname = B_.CreateGlobalString(llvm::StringRef(name));
-  abi_.callVoidN(B_, "py_trace_var_value",
+  abi_.callVoidN(B_, "trace_var_value",
                  {abi_.ptrTy(), abi_.ptrTy()}, {gname, slot});
 }
 
@@ -1489,7 +1489,7 @@ void IRGen::genFunction(const FuncDef *fd) {
 
 // 匿名函数:值类型没有函数表示,所以这里把它"提升"成一个模块内部函数,
 // 并记下最近生成的符号。赋值语句据此把变量名绑定到该内部函数,调用点再
-// 把它解析成直接调用。全程只动编译期信息,不碰 PyValue 的布局。
+// 把它解析成直接调用。全程只动编译期信息,不碰 lite::Value 的布局。
 Value *IRGen::genLambdaExpr(const Lambda *lam) {
   const std::string sym = "pylite_" + sanitize(moduleName_) + "_lambda" +
                           std::to_string(lambdaCounter_++);
@@ -1691,10 +1691,10 @@ Value *IRGen::genInstanceNew(const std::string &className, const Call *e) {
     irError(e->line, e->col, "未定义的类 '" + className + "'");
   }
   Value *np = ConstantPointerNull::get(cast<PointerType>(abi_.ptrTy()));
-  Value *attrs = abi_.callN(B_, "py_dict_new",
+  Value *attrs = abi_.callN(B_, "dict_new",
                             {abi_.ptrTy(), abi_.ptrTy(), abi_.i64Ty()},
                             {np, np, B_.getInt64(0)});
-  Value *inst = abi_.callN(B_, "py_instance_new", {abi_.i64Ty(), abi_.ptrTy()},
+  Value *inst = abi_.callN(B_, "instance_new", {abi_.i64Ty(), abi_.ptrTy()},
                            {B_.getInt64(idIt->second), attrs});
   auto cm = classMap_.find(className);
   if (cm != classMap_.end()) {
@@ -1721,7 +1721,7 @@ Value *IRGen::genInstanceNew(const std::string &className, const Call *e) {
 Value *IRGen::genAttrGet(const Attribute *a) {
   Value *obj = genExpr(a->obj.get());
   GlobalVariable *name = B_.CreateGlobalString(llvm::StringRef(a->name));
-  return abi_.callN(B_, "py_instance_get_attr",
+  return abi_.callN(B_, "instance_get_attr",
                     {abi_.ptrTy(), abi_.ptrTy(), abi_.i64Ty()},
                     {obj, name, B_.getInt64(static_cast<int64_t>(a->name.size()))});
 }
@@ -1730,7 +1730,7 @@ Value *IRGen::genAttrGet(const Attribute *a) {
 void IRGen::genAttrSet(const Attribute *a, Value *val) {
   Value *obj = genExpr(a->obj.get());
   GlobalVariable *name = B_.CreateGlobalString(llvm::StringRef(a->name));
-  abi_.callVoidN(B_, "py_instance_set_attr",
+  abi_.callVoidN(B_, "instance_set_attr",
                  {abi_.ptrTy(), abi_.ptrTy(), abi_.i64Ty(), abi_.ptrTy()},
                  {obj, name, B_.getInt64(static_cast<int64_t>(a->name.size())), val});
 }
@@ -1749,20 +1749,20 @@ void IRGen::genTopLevel(const Module &ast) {
 
   // 插桩:先把事件落盘路径挂上,再启动 SSE 服务(18900)。
   if (traceOn_) {
-    Function *dumpFn = M_.getFunction("py_trace_set_dump");
+    Function *dumpFn = M_.getFunction("trace_set_dump");
     if (dumpFn == nullptr) {
       dumpFn = Function::Create(
           FunctionType::get(abi_.voidTy(), {abi_.ptrTy()}, false),
-          Function::ExternalLinkage, "py_trace_set_dump", M_);
+          Function::ExternalLinkage, "trace_set_dump", M_);
     }
     GlobalVariable *dumpPath = B_.CreateGlobalString(
         llvm::StringRef("/tmp/pylite_trace/events.sse"));
     B_.CreateCall(dumpFn, {dumpPath});
-    Function *startFn = M_.getFunction("py_trace_start");
+    Function *startFn = M_.getFunction("trace_start");
     if (startFn == nullptr) {
       startFn = Function::Create(
           FunctionType::get(abi_.voidTy(), {abi_.i32Ty()}, false),
-          Function::ExternalLinkage, "py_trace_start", M_);
+          Function::ExternalLinkage, "trace_start", M_);
     }
     B_.CreateCall(startFn, {B_.getInt32(18900)});
   }
@@ -1778,7 +1778,7 @@ void IRGen::genTopLevel(const Module &ast) {
   }
   // 插桩:停掉 SSE 服务并关闭落盘文件。
   if (traceOn_) {
-    abi_.callVoidN(B_, "py_trace_stop", {}, {});
+    abi_.callVoidN(B_, "trace_stop", {}, {});
   }
   if (!B_.GetInsertBlock()->getTerminator()) B_.CreateRetVoid();
 
@@ -1813,7 +1813,7 @@ void IRGen::generate(const Module &ast) {
 
     std::vector<Type *> params;
     for (size_t i = 0; i < fd->params.size(); ++i) params.push_back(abi_.valueTy());
-    // 内部实现:模块内按值收发 PyValue(符号带 __impl 后缀)
+    // 内部实现:模块内按值收发 lite::Value(符号带 __impl 后缀)
     auto *ft = FunctionType::get(abi_.valueTy(), params, false);
     Function::Create(ft, Function::ExternalLinkage, sym, M_);
     // 导出包装:C++ 宿主约定 —— void(ptr sret, ptr args...)

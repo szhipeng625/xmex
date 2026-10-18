@@ -4,7 +4,7 @@
 //   1. 使用 CUDA Driver API（libcuda.so）而非 Runtime API，更底层、更灵活；
 //   2. PTX 代码由 LLVM NVPTX 后端生成，PyLite 负责编排编译流程；
 //   3. 提供 GPU 内存分配、数据传输、内核启动等核心原语；
-//   4. 所有操作返回 PyValue，与 PyLite 类型系统无缝对接。
+//   4. 所有操作返回 lite::Value，与 PyLite 类型系统无缝对接。
 //
 // 注意：需要 NVIDIA GPU 和 CUDA 驱动。当前机器有 RTX 4090，满足条件。
 #include "pylite/runtime.h"
@@ -160,10 +160,10 @@ char *captureCommand(const char *cmd) {
 
 // cuda_info() -> str
 // 返回 GPU 设备信息。
-extern "C" PyValue py_cuda_info() {
+extern "C" lite::Value cuda_info() {
   if (!initCudaDevice()) {
-    py_trace_op("cuda", "info", "", 0, 0);
-    py_runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
+    trace_op("cuda", "info", "", 0, 0);
+    runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
   }
   auto traceT0 = std::chrono::steady_clock::now();
 
@@ -188,10 +188,10 @@ extern "C" PyValue py_cuda_info() {
     "GPU: %s\n计算能力: %d.%d\n显存: %d MB",
     name, major, minor, memBytes / (1024 * 1024));
 
-  py_trace_op("cuda", "info", name, 1,
+  trace_op("cuda", "info", name, 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // cuda_compile_ptx(kernel_code: str, kernel_name: str) -> str
@@ -201,21 +201,21 @@ extern "C" PyValue py_cuda_info() {
 // 通过 nvcc 编译为 PTX 中间表示。
 //
 // 返回 PTX 代码字符串。
-extern "C" PyValue py_cuda_compile_ptx(const PyValue *kernelCode,
-                                        const PyValue *kernelName) {
-  if (kernelCode->tag != PY_STR) {
-    py_runtime_error("cuda_compile_ptx() 需要字符串参数: kernel_code");
+extern "C" lite::Value cuda_compile_ptx(const lite::Value *kernelCode,
+                                        const lite::Value *kernelName) {
+  if (kernelCode->tag != lite::kStr) {
+    runtime_error("cuda_compile_ptx() 需要字符串参数: kernel_code");
   }
   auto traceT0 = std::chrono::steady_clock::now();
-  const char *traceKn = (kernelName->tag == PY_STR) ? py_str_data(kernelName) : "";
+  const char *traceKn = (kernelName->tag == lite::kStr) ? str_data(kernelName) : "";
 
-  const char *code = py_str_data(kernelCode);
-  int64_t codeLen = py_str_size(kernelCode);
+  const char *code = str_data(kernelCode);
+  int64_t codeLen = str_size(kernelCode);
 
   // 将内核代码写入临时文件
   const char *tmpFile = "/tmp/pylite_kernel.cu";
   FILE *fp = fopen(tmpFile, "w");
-  if (!fp) py_runtime_error("cuda_compile_ptx() 失败: 无法创建临时文件");
+  if (!fp) runtime_error("cuda_compile_ptx() 失败: 无法创建临时文件");
   fwrite(code, 1, static_cast<size_t>(codeLen), fp);
   fclose(fp);
 
@@ -223,7 +223,7 @@ extern "C" PyValue py_cuda_compile_ptx(const PyValue *kernelCode,
   const char *ptxFile = "/tmp/pylite_kernel.ptx";
   size_t cmdCap = static_cast<size_t>(codeLen) + 256;
   char *cmd = static_cast<char *>(malloc(cmdCap));
-  if (!cmd) py_runtime_error("内存不足");
+  if (!cmd) runtime_error("内存不足");
 
   snprintf(cmd, cmdCap,
     "nvcc -ptx -o %s %s 2>&1",
@@ -238,11 +238,11 @@ extern "C" PyValue py_cuda_compile_ptx(const PyValue *kernelCode,
     char errBuf[1024];
     snprintf(errBuf, sizeof(errBuf),
       "CUDA 编译失败:\n%s", output ? output : "未知错误");
-    py_trace_op("cuda", "compile_ptx", traceKn, 0,
+    trace_op("cuda", "compile_ptx", traceKn, 0,
                 std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - traceT0).count());
     free(output);
-    py_runtime_error(errBuf);
+    runtime_error(errBuf);
   }
 
   // 读取 PTX 文件内容
@@ -251,14 +251,14 @@ extern "C" PyValue py_cuda_compile_ptx(const PyValue *kernelCode,
   fseek(fp, 0, SEEK_SET);
 
   char *ptxCode = static_cast<char *>(malloc(static_cast<size_t>(ptxSize) + 1));
-  if (!ptxCode) { fclose(fp); free(output); py_runtime_error("内存不足"); }
+  if (!ptxCode) { fclose(fp); free(output); runtime_error("内存不足"); }
 
   fread(ptxCode, 1, static_cast<size_t>(ptxSize), fp);
   ptxCode[ptxSize] = '\0';
   fclose(fp);
 
-  PyValue result = py_str_new(ptxCode, static_cast<int64_t>(ptxSize));
-  py_trace_op("cuda", "compile_ptx", traceKn, 1,
+  lite::Value result = str_new(ptxCode, static_cast<int64_t>(ptxSize));
+  trace_op("cuda", "compile_ptx", traceKn, 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());
   free(ptxCode);
@@ -283,49 +283,49 @@ extern "C" PyValue py_cuda_compile_ptx(const PyValue *kernelCode,
 //    {"type":"ptr","value":"gpu_buf_1"}]
 //
 // 返回执行状态字符串。
-extern "C" PyValue py_cuda_launch_kernel(const PyValue *ptxCode,
-                                          const PyValue *kernelName,
-                                          const PyValue *gridX,
-                                          const PyValue *gridY,
-                                          const PyValue *gridZ,
-                                          const PyValue *blockX,
-                                          const PyValue *blockY,
-                                          const PyValue *blockZ,
-                                          const PyValue *args) {
+extern "C" lite::Value cuda_launch_kernel(const lite::Value *ptxCode,
+                                          const lite::Value *kernelName,
+                                          const lite::Value *gridX,
+                                          const lite::Value *gridY,
+                                          const lite::Value *gridZ,
+                                          const lite::Value *blockX,
+                                          const lite::Value *blockY,
+                                          const lite::Value *blockZ,
+                                          const lite::Value *args) {
   if (!initCudaDevice()) {
-    py_trace_op("cuda", "launch_kernel", "", 0, 0);
-    py_runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
+    trace_op("cuda", "launch_kernel", "", 0, 0);
+    runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
   }
 
-  if (ptxCode->tag != PY_STR || kernelName->tag != PY_STR) {
-    py_runtime_error("cuda_launch_kernel() 需要 ptx_code 和 kernel_name 字符串参数");
+  if (ptxCode->tag != lite::kStr || kernelName->tag != lite::kStr) {
+    runtime_error("cuda_launch_kernel() 需要 ptx_code 和 kernel_name 字符串参数");
   }
   auto traceT0 = std::chrono::steady_clock::now();
 
-  const char *ptx = py_str_data(ptxCode);
-  const char *kname = py_str_data(kernelName);
+  const char *ptx = str_data(ptxCode);
+  const char *kname = str_data(kernelName);
 
   // 加载 PTX 模块
   CUmodule module;
   CUresult r = p_cuModuleLoadData(&module, ptx);
   if (r != CUDA_SUCCESS) {
-    py_runtime_error("CUDA 模块加载失败: PTX 代码无效");
+    runtime_error("CUDA 模块加载失败: PTX 代码无效");
   }
 
   // 获取内核函数
   CUfunction kernel;
   r = p_cuModuleGetFunction(&kernel, module, kname);
   if (r != CUDA_SUCCESS) {
-    py_runtime_error("CUDA 内核函数未找到: 请检查 kernel_name");
+    runtime_error("CUDA 内核函数未找到: 请检查 kernel_name");
   }
 
   // 获取网格和块维度
-  int64_t gx = (gridX->tag == PY_INT) ? py_as_int(*gridX) : 1;
-  int64_t gy = (gridY->tag == PY_INT) ? py_as_int(*gridY) : 1;
-  int64_t gz = (gridZ->tag == PY_INT) ? py_as_int(*gridZ) : 1;
-  int64_t bx = (blockX->tag == PY_INT) ? py_as_int(*blockX) : 256;
-  int64_t by = (blockY->tag == PY_INT) ? py_as_int(*blockY) : 1;
-  int64_t bz = (blockZ->tag == PY_INT) ? py_as_int(*blockZ) : 1;
+  int64_t gx = (gridX->tag == lite::kInt) ? as_int(*gridX) : 1;
+  int64_t gy = (gridY->tag == lite::kInt) ? as_int(*gridY) : 1;
+  int64_t gz = (gridZ->tag == lite::kInt) ? as_int(*gridZ) : 1;
+  int64_t bx = (blockX->tag == lite::kInt) ? as_int(*blockX) : 256;
+  int64_t by = (blockY->tag == lite::kInt) ? as_int(*blockY) : 1;
+  int64_t bz = (blockZ->tag == lite::kInt) ? as_int(*blockZ) : 1;
 
   // 启动内核（简化版：无参数传递，实际参数通过 args JSON 解析）
   void *kernelParams[] = {nullptr};  // 占位
@@ -340,13 +340,13 @@ extern "C" PyValue py_cuda_launch_kernel(const PyValue *ptxCode,
                        nullptr, kernelParams);
 
   if (r != CUDA_SUCCESS) {
-    py_runtime_error("CUDA 内核启动失败");
+    runtime_error("CUDA 内核启动失败");
   }
 
   // 同步等待完成
   r = p_cuCtxSynchronize();
   if (r != CUDA_SUCCESS) {
-    py_runtime_error("CUDA 同步失败");
+    runtime_error("CUDA 同步失败");
   }
 
   char buf[256];
@@ -354,138 +354,138 @@ extern "C" PyValue py_cuda_launch_kernel(const PyValue *ptxCode,
     "CUDA 内核 '%s' 已启动\n网格: (%lld,%lld,%lld)\n块: (%lld,%lld,%lld)\n状态: 完成",
     kname, gx, gy, gz, bx, by, bz);
 
-  py_trace_op("cuda", "launch_kernel", kname, 1,
+  trace_op("cuda", "launch_kernel", kname, 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // cuda_alloc(size: int) -> str
 // 在 GPU 上分配内存，返回内存句柄（用于后续操作）。
 //
 // 返回格式: "gpu_ptr:0x..."
-extern "C" PyValue py_cuda_alloc(const PyValue *size) {
+extern "C" lite::Value cuda_alloc(const lite::Value *size) {
   if (!initCudaDevice()) {
-    py_trace_op("cuda", "alloc", "", 0, 0);
-    py_runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
+    trace_op("cuda", "alloc", "", 0, 0);
+    runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
   }
 
-  if (size->tag != PY_INT) {
-    py_runtime_error("cuda_alloc() 需要一个整数参数: size");
+  if (size->tag != lite::kInt) {
+    runtime_error("cuda_alloc() 需要一个整数参数: size");
   }
   auto traceT0 = std::chrono::steady_clock::now();
 
-  int64_t sz = py_as_int(*size);
-  if (sz <= 0) py_runtime_error("cuda_alloc() 需要正数大小");
+  int64_t sz = as_int(*size);
+  if (sz <= 0) runtime_error("cuda_alloc() 需要正数大小");
 
   CUdeviceptr dptr;
   CUresult r = p_cuMemAlloc(&dptr, static_cast<size_t>(sz));
   if (r != CUDA_SUCCESS) {
-    py_runtime_error("CUDA 内存分配失败");
+    runtime_error("CUDA 内存分配失败");
   }
 
   char buf[64];
   snprintf(buf, sizeof(buf), "gpu_ptr:%p", reinterpret_cast<void *>(dptr));
-  py_trace_op("cuda", "alloc", buf, 1,
+  trace_op("cuda", "alloc", buf, 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // cuda_free(handle: str) -> None
 // 释放 GPU 内存。
-extern "C" void py_cuda_free(const PyValue *handle) {
+extern "C" void cuda_free(const lite::Value *handle) {
   if (!initCudaDevice()) {
-    py_trace_op("cuda", "free", "", 0, 0);
-    py_runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
+    trace_op("cuda", "free", "", 0, 0);
+    runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
   }
 
-  if (handle->tag != PY_STR) {
-    py_runtime_error("cuda_free() 需要一个字符串参数: handle");
+  if (handle->tag != lite::kStr) {
+    runtime_error("cuda_free() 需要一个字符串参数: handle");
   }
   auto traceT0 = std::chrono::steady_clock::now();
 
-  const char *h = py_str_data(handle);
+  const char *h = str_data(handle);
   void *ptr = nullptr;
   if (sscanf(h, "gpu_ptr:%p", &ptr) != 1 || !ptr) {
-    py_runtime_error("cuda_free() 无效的内存句柄");
+    runtime_error("cuda_free() 无效的内存句柄");
   }
 
   p_cuMemFree(reinterpret_cast<CUdeviceptr>(ptr));
-  py_trace_op("cuda", "free", h, 1,
+  trace_op("cuda", "free", h, 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());
 }
 
 // cuda_memcpy_to_device(handle: str, data: str) -> None
 // 将数据从主机复制到 GPU。
-extern "C" void py_cuda_memcpy_to_device(const PyValue *handle,
-                                          const PyValue *data) {
+extern "C" void cuda_memcpy_to_device(const lite::Value *handle,
+                                          const lite::Value *data) {
   if (!initCudaDevice()) {
-    py_trace_op("cuda", "memcpy_to_device", "", 0, 0);
-    py_runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
+    trace_op("cuda", "memcpy_to_device", "", 0, 0);
+    runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
   }
 
-  if (handle->tag != PY_STR || data->tag != PY_STR) {
-    py_runtime_error("cuda_memcpy_to_device() 需要 (str, str) 参数");
+  if (handle->tag != lite::kStr || data->tag != lite::kStr) {
+    runtime_error("cuda_memcpy_to_device() 需要 (str, str) 参数");
   }
   auto traceT0 = std::chrono::steady_clock::now();
 
-  const char *h = py_str_data(handle);
+  const char *h = str_data(handle);
   void *dptr = nullptr;
   if (sscanf(h, "gpu_ptr:%p", &dptr) != 1 || !dptr) {
-    py_runtime_error("cuda_memcpy_to_device() 无效的内存句柄");
+    runtime_error("cuda_memcpy_to_device() 无效的内存句柄");
   }
 
-  const char *src = py_str_data(data);
-  int64_t len = py_str_size(data);
+  const char *src = str_data(data);
+  int64_t len = str_size(data);
 
   CUresult r = p_cuMemcpyHtoD(reinterpret_cast<CUdeviceptr>(dptr),
                                src, static_cast<size_t>(len));
   if (r != CUDA_SUCCESS) {
-    py_runtime_error("CUDA 数据传输失败 (HtoD)");
+    runtime_error("CUDA 数据传输失败 (HtoD)");
   }
-  py_trace_op("cuda", "memcpy_to_device", h, 1,
+  trace_op("cuda", "memcpy_to_device", h, 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());
 }
 
 // cuda_memcpy_from_device(handle: str, size: int) -> str
 // 从 GPU 复制数据到主机，返回数据字符串。
-extern "C" PyValue py_cuda_memcpy_from_device(const PyValue *handle,
-                                               const PyValue *size) {
+extern "C" lite::Value cuda_memcpy_from_device(const lite::Value *handle,
+                                               const lite::Value *size) {
   if (!initCudaDevice()) {
-    py_trace_op("cuda", "memcpy_from_device", "", 0, 0);
-    py_runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
+    trace_op("cuda", "memcpy_from_device", "", 0, 0);
+    runtime_error("CUDA 初始化失败: 未检测到 NVIDIA GPU 或驱动");
   }
 
-  if (handle->tag != PY_STR || size->tag != PY_INT) {
-    py_runtime_error("cuda_memcpy_from_device() 需要 (str, int) 参数");
+  if (handle->tag != lite::kStr || size->tag != lite::kInt) {
+    runtime_error("cuda_memcpy_from_device() 需要 (str, int) 参数");
   }
   auto traceT0 = std::chrono::steady_clock::now();
 
-  const char *h = py_str_data(handle);
+  const char *h = str_data(handle);
   void *dptr = nullptr;
   if (sscanf(h, "gpu_ptr:%p", &dptr) != 1 || !dptr) {
-    py_runtime_error("cuda_memcpy_from_device() 无效的内存句柄");
+    runtime_error("cuda_memcpy_from_device() 无效的内存句柄");
   }
 
-  int64_t sz = py_as_int(*size);
-  if (sz <= 0) py_runtime_error("cuda_memcpy_from_device() 需要正数大小");
+  int64_t sz = as_int(*size);
+  if (sz <= 0) runtime_error("cuda_memcpy_from_device() 需要正数大小");
 
   char *buf = static_cast<char *>(malloc(static_cast<size_t>(sz) + 1));
-  if (!buf) py_runtime_error("内存不足");
+  if (!buf) runtime_error("内存不足");
 
   CUresult r = p_cuMemcpyDtoH(buf, reinterpret_cast<CUdeviceptr>(dptr),
                                static_cast<size_t>(sz));
   if (r != CUDA_SUCCESS) {
     free(buf);
-    py_runtime_error("CUDA 数据传输失败 (DtoH)");
+    runtime_error("CUDA 数据传输失败 (DtoH)");
   }
 
   buf[sz] = '\0';
-  PyValue result = py_str_new(buf, sz);
-  py_trace_op("cuda", "memcpy_from_device", h, 1,
+  lite::Value result = str_new(buf, sz);
+  trace_op("cuda", "memcpy_from_device", h, 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());
   free(buf);

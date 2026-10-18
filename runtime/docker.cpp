@@ -2,8 +2,8 @@
 //
 // 设计原则：
 //   1. 不引入 Docker SDK 依赖，只用系统自带的 docker 命令；
-//   2. 所有操作返回 PyValue，与 PyLite 类型系统无缝对接；
-//   3. 错误通过 py_runtime_error 抛出，调用方可以用 try/except 捕获。
+//   2. 所有操作返回 lite::Value，与 PyLite 类型系统无缝对接；
+//   3. 错误通过 runtime_error 抛出，调用方可以用 try/except 捕获。
 //
 // 注意：当前环境可能没有 Docker daemon，但代码逻辑是完整的，
 // 部署到有 Docker 的环境中即可直接使用。
@@ -61,22 +61,22 @@ void trimNewline(char *s) {
 // docker_run(image, command, ...) -> container_id: str
 // 启动一个容器并返回容器 ID。
 // 用法：docker_run("ubuntu:22.04", "echo hello")
-extern "C" PyValue py_docker_run(const PyValue *image, const PyValue *cmd) {
-  if (image->tag != PY_STR || cmd->tag != PY_STR) {
-    py_runtime_error("docker_run() 需要两个字符串参数: image, command");
+extern "C" lite::Value docker_run(const lite::Value *image, const lite::Value *cmd) {
+  if (image->tag != lite::kStr || cmd->tag != lite::kStr) {
+    runtime_error("docker_run() 需要两个字符串参数: image, command");
   }
   auto traceT0 = std::chrono::steady_clock::now();
 
-  const char *img = py_str_data(image);
-  const char *command = py_str_data(cmd);
-  int64_t imgLen = py_str_size(image);
-  int64_t cmdLen = py_str_size(cmd);
+  const char *img = str_data(image);
+  const char *command = str_data(cmd);
+  int64_t imgLen = str_size(image);
+  int64_t cmdLen = str_size(cmd);
 
   // 构造命令: docker run -d --rm <image> <command>
   // -d: 后台运行; --rm: 退出后自动删除
   size_t bufSize = static_cast<size_t>(imgLen + cmdLen + 64);
   char *fullCmd = static_cast<char *>(malloc(bufSize));
-  if (!fullCmd) py_runtime_error("内存不足");
+  if (!fullCmd) runtime_error("内存不足");
 
   snprintf(fullCmd, bufSize,
            "docker run -d --rm %.*s %.*s 2>&1",
@@ -87,7 +87,7 @@ extern "C" PyValue py_docker_run(const PyValue *image, const PyValue *cmd) {
   free(fullCmd);
 
   if (!output) {
-    py_runtime_error("docker run 失败: 无法执行 docker 命令");
+    runtime_error("docker run 失败: 无法执行 docker 命令");
   }
 
   trimNewline(output);
@@ -95,16 +95,16 @@ extern "C" PyValue py_docker_run(const PyValue *image, const PyValue *cmd) {
   // 检查是否是错误输出（docker 错误信息通常包含特定关键词）
   if (strstr(output, "Error") || strstr(output, "Cannot connect") ||
       strstr(output, "permission denied")) {
-    PyValue err = py_str_new(output, static_cast<int64_t>(strlen(output)));
+    lite::Value err = str_new(output, static_cast<int64_t>(strlen(output)));
     free(output);
-    // 用 py_repr 包装错误信息
+    // 用 repr 包装错误信息
     char errBuf[512];
-    snprintf(errBuf, sizeof(errBuf), "docker run 失败: %s", py_str_data(&err));
-    py_runtime_error(errBuf);
+    snprintf(errBuf, sizeof(errBuf), "docker run 失败: %s", str_data(&err));
+    runtime_error(errBuf);
   }
 
-  PyValue result = py_str_new(output, static_cast<int64_t>(strlen(output)));
-  py_trace_op("docker", "run", img, 1,
+  lite::Value result = str_new(output, static_cast<int64_t>(strlen(output)));
+  trace_op("docker", "run", img, 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());
   free(output);
@@ -113,16 +113,16 @@ extern "C" PyValue py_docker_run(const PyValue *image, const PyValue *cmd) {
 
 // docker_ps() -> str
 // 列出正在运行的容器，返回 docker ps 的输出。
-extern "C" PyValue py_docker_ps() {
+extern "C" lite::Value docker_ps() {
   auto traceT0 = std::chrono::steady_clock::now();
   char *output = captureCommand("docker ps 2>&1");
   if (!output) {
-    py_runtime_error("docker ps 失败: 无法执行 docker 命令");
+    runtime_error("docker ps 失败: 无法执行 docker 命令");
   }
 
   trimNewline(output);
-  PyValue result = py_str_new(output, static_cast<int64_t>(strlen(output)));
-  py_trace_op("docker", "ps", "", 1,
+  lite::Value result = str_new(output, static_cast<int64_t>(strlen(output)));
+  trace_op("docker", "ps", "", 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());
   free(output);
@@ -131,18 +131,18 @@ extern "C" PyValue py_docker_ps() {
 
 // docker_stop(container_id: str) -> None
 // 停止一个正在运行的容器。
-extern "C" void py_docker_stop(const PyValue *containerId) {
-  if (containerId->tag != PY_STR) {
-    py_runtime_error("docker_stop() 需要一个字符串参数: container_id");
+extern "C" void docker_stop(const lite::Value *containerId) {
+  if (containerId->tag != lite::kStr) {
+    runtime_error("docker_stop() 需要一个字符串参数: container_id");
   }
   auto traceT0 = std::chrono::steady_clock::now();
 
-  const char *cid = py_str_data(containerId);
-  int64_t cidLen = py_str_size(containerId);
+  const char *cid = str_data(containerId);
+  int64_t cidLen = str_size(containerId);
 
   size_t bufSize = static_cast<size_t>(cidLen + 32);
   char *fullCmd = static_cast<char *>(malloc(bufSize));
-  if (!fullCmd) py_runtime_error("内存不足");
+  if (!fullCmd) runtime_error("内存不足");
 
   snprintf(fullCmd, bufSize, "docker stop %.*s 2>&1",
            static_cast<int>(cidLen), cid);
@@ -155,9 +155,9 @@ extern "C" void py_docker_stop(const PyValue *containerId) {
       char errBuf[512];
       snprintf(errBuf, sizeof(errBuf), "docker stop 失败: %s", output);
       free(output);
-      py_runtime_error(errBuf);
+      runtime_error(errBuf);
     }
-    py_trace_op("docker", "stop", cid, 1,
+    trace_op("docker", "stop", cid, 1,
                 std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - traceT0).count());
     free(output);
@@ -166,18 +166,18 @@ extern "C" void py_docker_stop(const PyValue *containerId) {
 
 // docker_logs(container_id: str) -> str
 // 获取容器的日志输出。
-extern "C" PyValue py_docker_logs(const PyValue *containerId) {
-  if (containerId->tag != PY_STR) {
-    py_runtime_error("docker_logs() 需要一个字符串参数: container_id");
+extern "C" lite::Value docker_logs(const lite::Value *containerId) {
+  if (containerId->tag != lite::kStr) {
+    runtime_error("docker_logs() 需要一个字符串参数: container_id");
   }
   auto traceT0 = std::chrono::steady_clock::now();
 
-  const char *cid = py_str_data(containerId);
-  int64_t cidLen = py_str_size(containerId);
+  const char *cid = str_data(containerId);
+  int64_t cidLen = str_size(containerId);
 
   size_t bufSize = static_cast<size_t>(cidLen + 32);
   char *fullCmd = static_cast<char *>(malloc(bufSize));
-  if (!fullCmd) py_runtime_error("内存不足");
+  if (!fullCmd) runtime_error("内存不足");
 
   snprintf(fullCmd, bufSize, "docker logs %.*s 2>&1",
            static_cast<int>(cidLen), cid);
@@ -186,12 +186,12 @@ extern "C" PyValue py_docker_logs(const PyValue *containerId) {
   free(fullCmd);
 
   if (!output) {
-    py_runtime_error("docker logs 失败: 无法执行 docker 命令");
+    runtime_error("docker logs 失败: 无法执行 docker 命令");
   }
 
   trimNewline(output);
-  PyValue result = py_str_new(output, static_cast<int64_t>(strlen(output)));
-  py_trace_op("docker", "logs", cid, 1,
+  lite::Value result = str_new(output, static_cast<int64_t>(strlen(output)));
+  trace_op("docker", "logs", cid, 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());
   free(output);
@@ -200,18 +200,18 @@ extern "C" PyValue py_docker_logs(const PyValue *containerId) {
 
 // docker_pull(image: str) -> str
 // 拉取 Docker 镜像。
-extern "C" PyValue py_docker_pull(const PyValue *image) {
-  if (image->tag != PY_STR) {
-    py_runtime_error("docker_pull() 需要一个字符串参数: image");
+extern "C" lite::Value docker_pull(const lite::Value *image) {
+  if (image->tag != lite::kStr) {
+    runtime_error("docker_pull() 需要一个字符串参数: image");
   }
   auto traceT0 = std::chrono::steady_clock::now();
 
-  const char *img = py_str_data(image);
-  int64_t imgLen = py_str_size(image);
+  const char *img = str_data(image);
+  int64_t imgLen = str_size(image);
 
   size_t bufSize = static_cast<size_t>(imgLen + 32);
   char *fullCmd = static_cast<char *>(malloc(bufSize));
-  if (!fullCmd) py_runtime_error("内存不足");
+  if (!fullCmd) runtime_error("内存不足");
 
   snprintf(fullCmd, bufSize, "docker pull %.*s 2>&1",
            static_cast<int>(imgLen), img);
@@ -220,12 +220,12 @@ extern "C" PyValue py_docker_pull(const PyValue *image) {
   free(fullCmd);
 
   if (!output) {
-    py_runtime_error("docker pull 失败: 无法执行 docker 命令");
+    runtime_error("docker pull 失败: 无法执行 docker 命令");
   }
 
   trimNewline(output);
-  PyValue result = py_str_new(output, static_cast<int64_t>(strlen(output)));
-  py_trace_op("docker", "pull", img, 1,
+  lite::Value result = str_new(output, static_cast<int64_t>(strlen(output)));
+  trace_op("docker", "pull", img, 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());
   free(output);
@@ -240,32 +240,32 @@ extern "C" PyValue py_docker_pull(const PyValue *image) {
 //                             setup_commands: str, entrypoint: str,
 //                             expose_port: int) -> str
 // 根据项目描述生成 Dockerfile 内容。
-extern "C" PyValue py_docker_generate_dockerfile(const PyValue *baseImage,
-                                                  const PyValue *projectName,
-                                                  const PyValue *setupCommands,
-                                                  const PyValue *entrypoint,
-                                                  const PyValue *exposePort) {
-  if (baseImage->tag != PY_STR || projectName->tag != PY_STR ||
-      entrypoint->tag != PY_STR) {
-    py_runtime_error(
+extern "C" lite::Value docker_generate_dockerfile(const lite::Value *baseImage,
+                                                  const lite::Value *projectName,
+                                                  const lite::Value *setupCommands,
+                                                  const lite::Value *entrypoint,
+                                                  const lite::Value *exposePort) {
+  if (baseImage->tag != lite::kStr || projectName->tag != lite::kStr ||
+      entrypoint->tag != lite::kStr) {
+    runtime_error(
       "docker_generate_dockerfile() 需要字符串参数: base_image, project_name, entrypoint");
   }
   auto traceT0 = std::chrono::steady_clock::now();
 
-  const char *img = py_str_data(baseImage);
-  const char *name = py_str_data(projectName);
-  const char *cmds = (setupCommands->tag == PY_STR) ? py_str_data(setupCommands) : "";
-  const char *entry = py_str_data(entrypoint);
-  int64_t port = (exposePort->tag == PY_INT) ? py_as_int(*exposePort) : 0;
+  const char *img = str_data(baseImage);
+  const char *name = str_data(projectName);
+  const char *cmds = (setupCommands->tag == lite::kStr) ? str_data(setupCommands) : "";
+  const char *entry = str_data(entrypoint);
+  int64_t port = (exposePort->tag == lite::kInt) ? as_int(*exposePort) : 0;
 
-  int64_t imgLen = py_str_size(baseImage);
-  int64_t nameLen = py_str_size(projectName);
-  int64_t cmdsLen = (setupCommands->tag == PY_STR) ? py_str_size(setupCommands) : 0;
-  int64_t entryLen = py_str_size(entrypoint);
+  int64_t imgLen = str_size(baseImage);
+  int64_t nameLen = str_size(projectName);
+  int64_t cmdsLen = (setupCommands->tag == lite::kStr) ? str_size(setupCommands) : 0;
+  int64_t entryLen = str_size(entrypoint);
 
   size_t cap = static_cast<size_t>(imgLen + nameLen + cmdsLen + entryLen) + 1024;
   char *dockerfile = static_cast<char *>(malloc(cap));
-  if (!dockerfile) py_runtime_error("内存不足");
+  if (!dockerfile) runtime_error("内存不足");
 
   int n = snprintf(dockerfile, cap,
     "# Dockerfile generated by PyLite for project: %.*s\n"
@@ -308,8 +308,8 @@ extern "C" PyValue py_docker_generate_dockerfile(const PyValue *baseImage,
     "CMD %.*s\n",
     static_cast<int>(entryLen), entry);
 
-  PyValue result = py_str_new(dockerfile, static_cast<int64_t>(n));
-  py_trace_op("docker", "generate_dockerfile", name, 1,
+  lite::Value result = str_new(dockerfile, static_cast<int64_t>(n));
+  trace_op("docker", "generate_dockerfile", name, 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());
   free(dockerfile);
@@ -318,33 +318,33 @@ extern "C" PyValue py_docker_generate_dockerfile(const PyValue *baseImage,
 
 // docker_build(dockerfile: str, image_name: str, tag: str, context_dir: str) -> str
 // 构建 Docker 镜像。
-extern "C" PyValue py_docker_build(const PyValue *dockerfile,
-                                    const PyValue *imageName,
-                                    const PyValue *tag,
-                                    const PyValue *contextDir) {
-  if (imageName->tag != PY_STR || tag->tag != PY_STR ||
-      contextDir->tag != PY_STR) {
-    py_runtime_error(
+extern "C" lite::Value docker_build(const lite::Value *dockerfile,
+                                    const lite::Value *imageName,
+                                    const lite::Value *tag,
+                                    const lite::Value *contextDir) {
+  if (imageName->tag != lite::kStr || tag->tag != lite::kStr ||
+      contextDir->tag != lite::kStr) {
+    runtime_error(
       "docker_build() 需要字符串参数: image_name, tag, context_dir");
   }
   auto traceT0 = std::chrono::steady_clock::now();
 
-  const char *df = (dockerfile->tag == PY_STR) ? py_str_data(dockerfile) : "";
-  const char *name = py_str_data(imageName);
-  const char *t = py_str_data(tag);
-  const char *ctx = py_str_data(contextDir);
+  const char *df = (dockerfile->tag == lite::kStr) ? str_data(dockerfile) : "";
+  const char *name = str_data(imageName);
+  const char *t = str_data(tag);
+  const char *ctx = str_data(contextDir);
 
-  int64_t dfLen = (dockerfile->tag == PY_STR) ? py_str_size(dockerfile) : 0;
-  int64_t nameLen = py_str_size(imageName);
-  int64_t tagLen = py_str_size(tag);
-  int64_t ctxLen = py_str_size(contextDir);
+  int64_t dfLen = (dockerfile->tag == lite::kStr) ? str_size(dockerfile) : 0;
+  int64_t nameLen = str_size(imageName);
+  int64_t tagLen = str_size(tag);
+  int64_t ctxLen = str_size(contextDir);
 
   char tmpDf[256] = {0};
   bool useTempFile = false;
   if (dfLen > 0 && df[0] != '/') {
     snprintf(tmpDf, sizeof(tmpDf), "/tmp/pylite_dockerfile_%s", t);
     FILE *fp = fopen(tmpDf, "w");
-    if (!fp) py_runtime_error("docker_build() 失败: 无法创建临时 Dockerfile");
+    if (!fp) runtime_error("docker_build() 失败: 无法创建临时 Dockerfile");
     fwrite(df, 1, static_cast<size_t>(dfLen), fp);
     fclose(fp);
     useTempFile = true;
@@ -354,7 +354,7 @@ extern "C" PyValue py_docker_build(const PyValue *dockerfile,
 
   size_t cmdCap = static_cast<size_t>(nameLen + tagLen + ctxLen) + 512;
   char *cmd = static_cast<char *>(malloc(cmdCap));
-  if (!cmd) py_runtime_error("内存不足");
+  if (!cmd) runtime_error("内存不足");
 
   if (dfLen > 0) {
     snprintf(cmd, cmdCap,
@@ -377,12 +377,12 @@ extern "C" PyValue py_docker_build(const PyValue *dockerfile,
   if (useTempFile) remove(tmpDf);
 
   if (!output) {
-    py_runtime_error("docker build 失败: 无法执行 docker 命令");
+    runtime_error("docker build 失败: 无法执行 docker 命令");
   }
 
   trimNewline(output);
-  PyValue result = py_str_new(output, static_cast<int64_t>(strlen(output)));
-  py_trace_op("docker", "build", name, 1,
+  lite::Value result = str_new(output, static_cast<int64_t>(strlen(output)));
+  trace_op("docker", "build", name, 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());
   free(output);
@@ -391,25 +391,25 @@ extern "C" PyValue py_docker_build(const PyValue *dockerfile,
 
 // docker_push(image_name: str, tag: str, registry: str) -> str
 // 推送 Docker 镜像到镜像仓库。
-extern "C" PyValue py_docker_push(const PyValue *imageName,
-                                   const PyValue *tag,
-                                   const PyValue *registry) {
-  if (imageName->tag != PY_STR || tag->tag != PY_STR) {
-    py_runtime_error("docker_push() 需要字符串参数: image_name, tag");
+extern "C" lite::Value docker_push(const lite::Value *imageName,
+                                   const lite::Value *tag,
+                                   const lite::Value *registry) {
+  if (imageName->tag != lite::kStr || tag->tag != lite::kStr) {
+    runtime_error("docker_push() 需要字符串参数: image_name, tag");
   }
   auto traceT0 = std::chrono::steady_clock::now();
 
-  const char *name = py_str_data(imageName);
-  const char *t = py_str_data(tag);
-  const char *reg = (registry->tag == PY_STR) ? py_str_data(registry) : "";
+  const char *name = str_data(imageName);
+  const char *t = str_data(tag);
+  const char *reg = (registry->tag == lite::kStr) ? str_data(registry) : "";
 
-  int64_t nameLen = py_str_size(imageName);
-  int64_t tagLen = py_str_size(tag);
-  int64_t regLen = (registry->tag == PY_STR) ? py_str_size(registry) : 0;
+  int64_t nameLen = str_size(imageName);
+  int64_t tagLen = str_size(tag);
+  int64_t regLen = (registry->tag == lite::kStr) ? str_size(registry) : 0;
 
   size_t fullCap = static_cast<size_t>(regLen + nameLen + tagLen) + 32;
   char *fullName = static_cast<char *>(malloc(fullCap));
-  if (!fullName) py_runtime_error("内存不足");
+  if (!fullName) runtime_error("内存不足");
 
   if (regLen > 0) {
     snprintf(fullName, fullCap, "%.*s/%.*s:%.*s",
@@ -439,7 +439,7 @@ extern "C" PyValue py_docker_push(const PyValue *imageName,
 
   size_t cmdCap = fullCap + 64;
   char *cmd = static_cast<char *>(malloc(cmdCap));
-  if (!cmd) { free(fullName); py_runtime_error("内存不足"); }
+  if (!cmd) { free(fullName); runtime_error("内存不足"); }
 
   snprintf(cmd, cmdCap, "docker push %s 2>&1", fullName);
 
@@ -448,12 +448,12 @@ extern "C" PyValue py_docker_push(const PyValue *imageName,
   free(fullName);
 
   if (!output) {
-    py_runtime_error("docker push 失败: 无法执行 docker 命令");
+    runtime_error("docker push 失败: 无法执行 docker 命令");
   }
 
   trimNewline(output);
-  PyValue result = py_str_new(output, static_cast<int64_t>(strlen(output)));
-  py_trace_op("docker", "push", name, 1,
+  lite::Value result = str_new(output, static_cast<int64_t>(strlen(output)));
+  trace_op("docker", "push", name, 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());
   free(output);
@@ -464,58 +464,58 @@ extern "C" PyValue py_docker_push(const PyValue *imageName,
 //                          base_image: str, setup_commands: str,
 //                          entrypoint: str, expose_port: int) -> str
 // 一键封装项目为 Docker 镜像。
-extern "C" PyValue py_docker_project_package(const PyValue *projectDir,
-                                              const PyValue *imageName,
-                                              const PyValue *tag,
-                                              const PyValue *baseImage,
-                                              const PyValue *setupCommands,
-                                              const PyValue *entrypoint,
-                                              const PyValue *exposePort) {
-  if (projectDir->tag != PY_STR || imageName->tag != PY_STR ||
-      tag->tag != PY_STR || baseImage->tag != PY_STR ||
-      entrypoint->tag != PY_STR) {
-    py_runtime_error(
+extern "C" lite::Value docker_project_package(const lite::Value *projectDir,
+                                              const lite::Value *imageName,
+                                              const lite::Value *tag,
+                                              const lite::Value *baseImage,
+                                              const lite::Value *setupCommands,
+                                              const lite::Value *entrypoint,
+                                              const lite::Value *exposePort) {
+  if (projectDir->tag != lite::kStr || imageName->tag != lite::kStr ||
+      tag->tag != lite::kStr || baseImage->tag != lite::kStr ||
+      entrypoint->tag != lite::kStr) {
+    runtime_error(
       "docker_project_package() 需要字符串参数: "
       "project_dir, image_name, tag, base_image, entrypoint");
   }
   auto traceT0 = std::chrono::steady_clock::now();
 
-  PyValue df = py_docker_generate_dockerfile(baseImage, imageName,
+  lite::Value df = docker_generate_dockerfile(baseImage, imageName,
                                               setupCommands, entrypoint,
                                               exposePort);
 
-  const char *dir = py_str_data(projectDir);
-  int64_t dirLen = py_str_size(projectDir);
+  const char *dir = str_data(projectDir);
+  int64_t dirLen = str_size(projectDir);
 
   size_t dfPathCap = static_cast<size_t>(dirLen) + 32;
   char *dfPath = static_cast<char *>(malloc(dfPathCap));
-  if (!dfPath) py_runtime_error("内存不足");
+  if (!dfPath) runtime_error("内存不足");
 
   snprintf(dfPath, dfPathCap, "%.*s/Dockerfile", static_cast<int>(dirLen), dir);
 
-  const char *dfContent = py_str_data(&df);
-  int64_t dfContentLen = py_str_size(&df);
+  const char *dfContent = str_data(&df);
+  int64_t dfContentLen = str_size(&df);
 
   FILE *fp = fopen(dfPath, "w");
   if (!fp) {
     free(dfPath);
-    py_runtime_error("docker_project_package() 失败: 无法写入 Dockerfile");
+    runtime_error("docker_project_package() 失败: 无法写入 Dockerfile");
   }
   fwrite(dfContent, 1, static_cast<size_t>(dfContentLen), fp);
   fclose(fp);
 
-  PyValue buildResult = py_docker_build(&df, imageName, tag, projectDir);
+  lite::Value buildResult = docker_build(&df, imageName, tag, projectDir);
 
-  const char *buildOut = py_str_data(&buildResult);
-  int64_t buildOutLen = py_str_size(&buildResult);
-  const char *imgName = py_str_data(imageName);
-  int64_t imgNameLen = py_str_size(imageName);
-  const char *t = py_str_data(tag);
-  int64_t tLen = py_str_size(tag);
+  const char *buildOut = str_data(&buildResult);
+  int64_t buildOutLen = str_size(&buildResult);
+  const char *imgName = str_data(imageName);
+  int64_t imgNameLen = str_size(imageName);
+  const char *t = str_data(tag);
+  int64_t tLen = str_size(tag);
 
   size_t summaryCap = static_cast<size_t>(buildOutLen + imgNameLen + tLen + dirLen) + 512;
   char *summary = static_cast<char *>(malloc(summaryCap));
-  if (!summary) { free(dfPath); py_runtime_error("内存不足"); }
+  if (!summary) { free(dfPath); runtime_error("内存不足"); }
 
   snprintf(summary, summaryCap,
     "[PyLite Docker 封装完成]\n"
@@ -532,8 +532,8 @@ extern "C" PyValue py_docker_project_package(const PyValue *projectDir,
 
   free(dfPath);
 
-  PyValue result = py_str_new(summary, static_cast<int64_t>(strlen(summary)));
-  py_trace_op("docker", "project_package", imgName, 1,
+  lite::Value result = str_new(summary, static_cast<int64_t>(strlen(summary)));
+  trace_op("docker", "project_package", imgName, 1,
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - traceT0).count());
   free(summary);

@@ -82,7 +82,7 @@ for x in xs:
 
 ```cpp
 // main.cpp
-extern "C" void pylite_hello_main();   // 按 ABI 约定,参数/返回值都是 PyValue*
+extern "C" void pylite_hello_main();   // 按 ABI 约定,参数/返回值都是 lite::Value*
 int main() {
   pylite_hello_main();
   return 0;
@@ -101,7 +101,7 @@ g++ -std=c++20 main.cpp hello.o -o hello.exe -L./build-win/bin -lpylite_runtime
 运行时则需要 `libpylite_runtime.dll` 在 `PATH` 上(它与 `pylitec.exe` 同在
 `build-win/bin/`,把那个目录加进 PATH 最省事)。
 
-调用带参数的 PyLite 函数时,所有 `PyValue` 都**按指针**收发 ——
+调用带参数的 PyLite 函数时,所有 `lite::Value` 都**按指针**收发 ——
 这是 Win64 ABI 的硬性要求,详见下面的"两个务必先读的点"。返回值也走第一个
 指针参数(隐藏的 sret):
 
@@ -109,9 +109,9 @@ g++ -std=c++20 main.cpp hello.o -o hello.exe -L./build-win/bin -lpylite_runtime
 #include "pylite/runtime.h"   // 编译时要加 -I./include
 
 // pylitec 为 `def add(a, b): return a + b` 生成的符号
-extern "C" void pylite_math_add(PyValue *ret, PyValue *a, PyValue *b);
+extern "C" void pylite_math_add(lite::Value *ret, lite::Value *a, lite::Value *b);
 
-PyValue a = py_int(1), b = py_int(2), r;
+lite::Value a = int_(1), b = int_(2), r;
 pylite_math_add(&r, &a, &b);     // r 里是 3
 ```
 
@@ -161,7 +161,7 @@ cd build && ctest --output-on-failure
 | 现象 | 原因 |
 |---|---|
 | 启动时报缺少 `libpylite_runtime.dll` | 没在 UCRT64 shell 里跑,或没把 `build-win/bin` 加进 PATH |
-| 链接报 `undefined reference to 'py_add'` | 忘了 `-lpylite_runtime` |
+| 链接报 `undefined reference to 'add'` | 忘了 `-lpylite_runtime` |
 | 编译成功、链接成功,一运行就段错误 | 几乎总是 ABI 边界问题 —— 见下节第 1 点 |
 | 中文输出在测试里比对失败 | 比对框架只支持 ASCII 输出,见 `tests/compare_output.cmake` |
 
@@ -173,7 +173,7 @@ cd build && ctest --output-on-failure
 | `irgen/` | AST → LLVM IR,含集中管理 ABI 约定的 `abi.h` |
 | `aot/` | 目标文件 / IR 文本生成 |
 | `runtime/` | 运行时库(`libpylite_runtime.dll`),由 GCC 编译 |
-| `include/pylite/value.h` | `PyValue` —— 整个项目的 ABI 基石 |
+| `include/pylite/value.h` | `lite::Value` —— 整个项目的 ABI 基石 |
 | `docs/llvm-notes.md` | LLVM 集成的实测结论,**改代码前先读** |
 | `docs/language.md` | 支持的语言子集与已知限制 |
 | `examples/mixed/` | **混合语言完整示例**:C++ 宿主 + PyLite 业务逻辑,附[说明文档](examples/mixed/README.md) |
@@ -191,16 +191,16 @@ cd build && ctest --output-on-failure
 | `runtime/dict.cpp` | 插入有序字典 |
 | `runtime/tuple.cpp` | 元组(承载多返回值) |
 | `runtime/index.cpp` | 下标/切片/`len` 的按类型分派 |
-| `runtime/method.cpp` | 方法表与 `py_call_method` 分派 |
+| `runtime/method.cpp` | 方法表与 `call_method` 分派 |
 | `runtime/io.cpp` | `print`/`input` 与 repr 渲染 |
 
 ## 两个务必先读的点
 
-1. **[docs/llvm-notes.md](docs/llvm-notes.md) 第 2 节:PyValue 绝不能按值跨 ABI 边界。**
+1. **[docs/llvm-notes.md](docs/llvm-notes.md) 第 2 节:lite::Value 绝不能按值跨 ABI 边界。**
    Win64 规定大于 8 字节的聚合体按引用传递。在 IR 里按值声明会**链接通过、
    lookup 成功、一执行就段错误**。所有运行时调用都要经过 `irgen/abi.h`。
 
-2. **运行时必须是 DLL,不能是静态库。** JIT 生成的代码要在运行时解析 `py_add`
+2. **运行时必须是 DLL,不能是静态库。** JIT 生成的代码要在运行时解析 `add`
    这类符号,而 Windows 上 MinGW 链接出的 exe 几乎不导出任何符号。
 
 ## 内存回收
@@ -213,11 +213,11 @@ cd build && ctest --output-on-failure
 是因为本项目本来就有的两条约定:
 
 1. 只有容器是堆对象,标量是内联的、根本不分配;
-2. 每个 `PyValue` 都住在栈上的 alloca 里,而且槽位地址几乎都会传给 DLL 里的
+2. 每个 `lite::Value` 都住在栈上的 alloca 里,而且槽位地址几乎都会传给 DLL 里的
    不透明运行时函数,所以 LLVM 的 memopt 提升不掉它们。
 
 代价写在 [docs/language.md](docs/language.md) 里:不压缩(会有碎片)、偶尔误保留、
-**根必须放在栈上**(全局 / `static` / `thread_local` 里放 `PyValue` 不算根)。
+**根必须放在栈上**(全局 / `static` / `thread_local` 里放 `lite::Value` 不算根)。
 
 ## 已知限制
 

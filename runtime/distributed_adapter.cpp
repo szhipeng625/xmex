@@ -1,93 +1,93 @@
-// 分布式模块 PyValue 适配器
-// 将 PyValue* 参数转换为 const char* + int64_t 形式，
+// 分布式模块 lite::Value 适配器
+// 将 lite::Value* 参数转换为 const char* + int64_t 形式，
 // 使 raft/cluster/kv 模块的函数可以被 PyLite 内置模块调用机制使用。
 #include "pylite/runtime.h"
 #include "pylite/value.h"
 #include <cstring>
 
-// 从 PyValue 中提取字符串指针和长度
-static const char* strPtr(const PyValue* v) {
-    if (v->tag != PY_STR) return "";
-    return py_str_data(v);
+// 从 lite::Value 中提取字符串指针和长度
+static const char* strPtr(const lite::Value* v) {
+    if (v->tag != lite::kStr) return "";
+    return str_data(v);
 }
-static int64_t strLen(const PyValue* v) {
-    if (v->tag != PY_STR) return 0;
-    return py_str_size(v);
+static int64_t strLen(const lite::Value* v) {
+    if (v->tag != lite::kStr) return 0;
+    return str_size(v);
 }
 // 底层 kv 接口前置声明
-extern "C" PyValue py_kv_persist(const char*, int64_t);
+extern "C" lite::Value kv_persist(const char*, int64_t);
 // ====== Raft 适配器 ======
 extern "C" {
 
-PyValue py_raft_build_v(const PyValue* config) {
-    return py_raft_build(strPtr(config), strLen(config));
+lite::Value raft_build_v(const lite::Value* config) {
+    return raft_build(strPtr(config), strLen(config));
 }
 
-PyValue py_raft_erase_v(const PyValue* node_id) {
-    return py_raft_erase(strPtr(node_id), strLen(node_id));
+lite::Value raft_erase_v(const lite::Value* node_id) {
+    return raft_erase(strPtr(node_id), strLen(node_id));
 }
 
-PyValue py_raft_status_v(const PyValue* node_id) {
-    return py_raft_status(strPtr(node_id), strLen(node_id));
+lite::Value raft_status_v(const lite::Value* node_id) {
+    return raft_status(strPtr(node_id), strLen(node_id));
 }
 
-PyValue py_raft_list_nodes_v() {
-    return py_raft_list_nodes();
+lite::Value raft_list_nodes_v() {
+    return raft_list_nodes();
 }
 
-PyValue py_raft_add_v(const PyValue* node_id, const PyValue* cmd_type, const PyValue* payload) {
-    return py_raft_add(strPtr(node_id), strLen(node_id),
+lite::Value raft_add_v(const lite::Value* node_id, const lite::Value* cmd_type, const lite::Value* payload) {
+    return raft_add(strPtr(node_id), strLen(node_id),
                        strPtr(cmd_type), strLen(cmd_type),
                        strPtr(payload), strLen(payload));
 }
 
-PyValue py_raft_register_handler_v(const PyValue* node_id, const PyValue* cmd_type) {
-    int64_t r = py_raft_register_handler(strPtr(node_id), strLen(node_id),
+lite::Value raft_register_handler_v(const lite::Value* node_id, const lite::Value* cmd_type) {
+    int64_t r = raft_register_handler(strPtr(node_id), strLen(node_id),
                                           strPtr(cmd_type), strLen(cmd_type));
-    return py_int(r);
+    return int_(r);
 }
 
-PyValue py_raft_register_node_v(const PyValue* node_id, const PyValue* role, const PyValue* addr) {
-    return py_raft_register_node(strPtr(node_id), strLen(node_id),
+lite::Value raft_register_node_v(const lite::Value* node_id, const lite::Value* role, const lite::Value* addr) {
+    return raft_register_node(strPtr(node_id), strLen(node_id),
                                  strPtr(role), strLen(role),
                                  strPtr(addr), strLen(addr));
 }
 
-PyValue py_raft_cluster_nodes_v(const PyValue* node_id) {
-    return py_raft_cluster_nodes(strPtr(node_id), strLen(node_id));
+lite::Value raft_cluster_nodes_v(const lite::Value* node_id) {
+    return raft_cluster_nodes(strPtr(node_id), strLen(node_id));
 }
 
-PyValue py_raft_mount_storage_v(const PyValue* node_id, const PyValue* name, const PyValue* path) {
-    return py_raft_mount_storage(strPtr(node_id), strLen(node_id),
+lite::Value raft_mount_storage_v(const lite::Value* node_id, const lite::Value* name, const lite::Value* path) {
+    return raft_mount_storage(strPtr(node_id), strLen(node_id),
                                  strPtr(name), strLen(name),
                                  strPtr(path), strLen(path));
 }
 
-PyValue py_raft_plugin_load_v(const PyValue* node_id, const PyValue* name, const PyValue* so_path) {
-    return py_raft_plugin_load(strPtr(node_id), strLen(node_id),
+lite::Value raft_plugin_load_v(const lite::Value* node_id, const lite::Value* name, const lite::Value* so_path) {
+    return raft_plugin_load(strPtr(node_id), strLen(node_id),
                                strPtr(name), strLen(name),
                                strPtr(so_path), strLen(so_path));
 }
 
-PyValue py_raft_plugin_unload_v(const PyValue* node_id, const PyValue* name) {
-    return py_raft_plugin_unload(strPtr(node_id), strLen(node_id),
+lite::Value raft_plugin_unload_v(const lite::Value* node_id, const lite::Value* name) {
+    return raft_plugin_unload(strPtr(node_id), strLen(node_id),
                                  strPtr(name), strLen(name));
 }
 
-PyValue py_raft_plugin_list_v(const PyValue* node_id) {
-    return py_raft_plugin_list(strPtr(node_id), strLen(node_id));
+lite::Value raft_plugin_list_v(const lite::Value* node_id) {
+    return raft_plugin_list(strPtr(node_id), strLen(node_id));
 }
 
 // ====== 分布式便捷内建适配器(2026-10 增补) ======
-PyValue py_raft_leader_info_v(const PyValue* node_id) {
-    return py_raft_leader_info(strPtr(node_id), strLen(node_id));
+lite::Value raft_leader_info_v(const lite::Value* node_id) {
+    return raft_leader_info(strPtr(node_id), strLen(node_id));
 }
-PyValue py_raft_send_v(const PyValue* node_id, const PyValue* msg) {
-    return py_raft_send(strPtr(node_id), strLen(node_id),
+lite::Value raft_send_v(const lite::Value* node_id, const lite::Value* msg) {
+    return raft_send(strPtr(node_id), strLen(node_id),
                         strPtr(msg), strLen(msg));
 }
-PyValue py_raft_recv_v(const PyValue* node_id) {
-    return py_raft_recv(strPtr(node_id), strLen(node_id));
+lite::Value raft_recv_v(const lite::Value* node_id) {
+    return raft_recv(strPtr(node_id), strLen(node_id));
 }
 
 }  // extern "C"
@@ -100,220 +100,220 @@ extern "C" {
 
 // ====== Cluster 适配器 ======
 
-PyValue py_cluster_connect_v(const PyValue* name, const PyValue* addr, const PyValue* secret) {
-    return py_cluster_connect(strPtr(name), strLen(name),
+lite::Value cluster_connect_v(const lite::Value* name, const lite::Value* addr, const lite::Value* secret) {
+    return cluster_connect(strPtr(name), strLen(name),
                               strPtr(addr), strLen(addr),
                               strPtr(secret), strLen(secret));
 }
 
-PyValue py_cluster_disconnect_v(const PyValue* name) {
-    return py_cluster_disconnect(strPtr(name), strLen(name));
+lite::Value cluster_disconnect_v(const lite::Value* name) {
+    return cluster_disconnect(strPtr(name), strLen(name));
 }
 
-PyValue py_cluster_list_v() {
-    return py_cluster_list();
+lite::Value cluster_list_v() {
+    return cluster_list();
 }
 
-PyValue py_cluster_is_connected_v(const PyValue* name) {
-    int64_t r = py_cluster_is_connected(strPtr(name), strLen(name));
-    return py_int(r);
+lite::Value cluster_is_connected_v(const lite::Value* name) {
+    int64_t r = cluster_is_connected(strPtr(name), strLen(name));
+    return int_(r);
 }
 
-PyValue py_cluster_status_v(const PyValue* name) {
-    return py_cluster_status(strPtr(name), strLen(name));
+lite::Value cluster_status_v(const lite::Value* name) {
+    return cluster_status(strPtr(name), strLen(name));
 }
 
-PyValue py_cluster_nodes_v(const PyValue* name) {
-    return py_cluster_nodes(strPtr(name), strLen(name));
+lite::Value cluster_nodes_v(const lite::Value* name) {
+    return cluster_nodes(strPtr(name), strLen(name));
 }
 
-PyValue py_cluster_health_v(const PyValue* name) {
-    int64_t r = py_cluster_health(strPtr(name), strLen(name));
-    return py_int(r);
+lite::Value cluster_health_v(const lite::Value* name) {
+    int64_t r = cluster_health(strPtr(name), strLen(name));
+    return int_(r);
 }
 
-PyValue py_cluster_exec_v(const PyValue* name, const PyValue* cmd_type, const PyValue* payload) {
-    return py_cluster_exec(strPtr(name), strLen(name),
+lite::Value cluster_exec_v(const lite::Value* name, const lite::Value* cmd_type, const lite::Value* payload) {
+    return cluster_exec(strPtr(name), strLen(name),
                            strPtr(cmd_type), strLen(cmd_type),
                            strPtr(payload), strLen(payload));
 }
 
-PyValue py_cluster_query_v(const PyValue* name, const PyValue* path) {
-    return py_cluster_query(strPtr(name), strLen(name),
+lite::Value cluster_query_v(const lite::Value* name, const lite::Value* path) {
+    return cluster_query(strPtr(name), strLen(name),
                             strPtr(path), strLen(path));
 }
 
-PyValue py_cluster_broadcast_v(const PyValue* cmd_type, const PyValue* payload) {
-    return py_cluster_broadcast(strPtr(cmd_type), strLen(cmd_type),
+lite::Value cluster_broadcast_v(const lite::Value* cmd_type, const lite::Value* payload) {
+    return cluster_broadcast(strPtr(cmd_type), strLen(cmd_type),
                                 strPtr(payload), strLen(payload));
 }
 
-PyValue py_cluster_health_all_v() {
-    return py_cluster_health_all();
+lite::Value cluster_health_all_v() {
+    return cluster_health_all();
 }
 
 // ====== KvAdmin 适配器 ======
 
-PyValue py_kv_build_v(const PyValue* node_id, const PyValue* binary, const PyValue* args_json,
-                      const PyValue* work_dir, const PyValue* addr) {
-    return py_kv_build(strPtr(node_id), strLen(node_id),
+lite::Value kv_build_v(const lite::Value* node_id, const lite::Value* binary, const lite::Value* args_json,
+                      const lite::Value* work_dir, const lite::Value* addr) {
+    return kv_build(strPtr(node_id), strLen(node_id),
                        strPtr(binary), strLen(binary),
                        strPtr(args_json), strLen(args_json),
                        strPtr(work_dir), strLen(work_dir),
                        strPtr(addr), strLen(addr));
 }
 
-PyValue py_kv_add_v(const PyValue* node_id, const PyValue* binary, const PyValue* args_json,
-                    const PyValue* work_dir, const PyValue* addr) {
-    return py_kv_add(strPtr(node_id), strLen(node_id),
+lite::Value kv_add_v(const lite::Value* node_id, const lite::Value* binary, const lite::Value* args_json,
+                    const lite::Value* work_dir, const lite::Value* addr) {
+    return kv_add(strPtr(node_id), strLen(node_id),
                      strPtr(binary), strLen(binary),
                      strPtr(args_json), strLen(args_json),
                      strPtr(work_dir), strLen(work_dir),
                      strPtr(addr), strLen(addr));
 }
 
-PyValue py_kv_erase_v(const PyValue* node_id) {
-    return py_kv_erase(strPtr(node_id), strLen(node_id));
+lite::Value kv_erase_v(const lite::Value* node_id) {
+    return kv_erase(strPtr(node_id), strLen(node_id));
 }
 
-PyValue py_kv_skip_v(const PyValue* node_id) {
-    return py_kv_skip(strPtr(node_id), strLen(node_id));
+lite::Value kv_skip_v(const lite::Value* node_id) {
+    return kv_skip(strPtr(node_id), strLen(node_id));
 }
 
-PyValue py_kv_sleep_v(const PyValue* node_id) {
-    return py_kv_sleep(strPtr(node_id), strLen(node_id));
+lite::Value kv_sleep_v(const lite::Value* node_id) {
+    return kv_sleep(strPtr(node_id), strLen(node_id));
 }
 
-PyValue py_kv_wakeup_v(const PyValue* node_id) {
-    return py_kv_wakeup(strPtr(node_id), strLen(node_id));
+lite::Value kv_wakeup_v(const lite::Value* node_id) {
+    return kv_wakeup(strPtr(node_id), strLen(node_id));
 }
 
-PyValue py_kv_stop_v(const PyValue* node_id) {
-    return py_kv_stop(strPtr(node_id), strLen(node_id));
+lite::Value kv_stop_v(const lite::Value* node_id) {
+    return kv_stop(strPtr(node_id), strLen(node_id));
 }
 
-PyValue py_kv_restart_v(const PyValue* node_id) {
-    return py_kv_restart(strPtr(node_id), strLen(node_id));
+lite::Value kv_restart_v(const lite::Value* node_id) {
+    return kv_restart(strPtr(node_id), strLen(node_id));
 }
 
-PyValue py_kv_status_v(const PyValue* node_id) {
-    return py_kv_status(strPtr(node_id), strLen(node_id));
+lite::Value kv_status_v(const lite::Value* node_id) {
+    return kv_status(strPtr(node_id), strLen(node_id));
 }
 
-PyValue py_kv_list_v() {
-    return py_kv_list();
+lite::Value kv_list_v() {
+    return kv_list();
 }
 
-PyValue py_kv_persist_v(const PyValue* addr) {
-    return py_kv_persist(strPtr(addr), strLen(addr));
+lite::Value kv_persist_v(const lite::Value* addr) {
+    return kv_persist(strPtr(addr), strLen(addr));
 }
-PyValue py_kv_alive_v(const PyValue* node_id) {
-    int64_t r = py_kv_alive(strPtr(node_id), strLen(node_id));
-    return py_int(r);
-}
-
-PyValue py_kv_bind_sandbox_v(const PyValue* node_id, const PyValue* handle) {
-    int64_t r = py_kv_bind_sandbox(strPtr(node_id), strLen(node_id), handle->as.i);
-    return py_int(r);
+lite::Value kv_alive_v(const lite::Value* node_id) {
+    int64_t r = kv_alive(strPtr(node_id), strLen(node_id));
+    return int_(r);
 }
 
-PyValue py_kv_get_sandbox_v(const PyValue* node_id) {
-    int64_t r = py_kv_get_sandbox(strPtr(node_id), strLen(node_id));
-    return py_int(r);
+lite::Value kv_bind_sandbox_v(const lite::Value* node_id, const lite::Value* handle) {
+    int64_t r = kv_bind_sandbox(strPtr(node_id), strLen(node_id), handle->as.i);
+    return int_(r);
 }
 
-PyValue py_kv_unbind_sandbox_v(const PyValue* node_id) {
-    int64_t r = py_kv_unbind_sandbox(strPtr(node_id), strLen(node_id));
-    return py_int(r);
+lite::Value kv_get_sandbox_v(const lite::Value* node_id) {
+    int64_t r = kv_get_sandbox(strPtr(node_id), strLen(node_id));
+    return int_(r);
+}
+
+lite::Value kv_unbind_sandbox_v(const lite::Value* node_id) {
+    int64_t r = kv_unbind_sandbox(strPtr(node_id), strLen(node_id));
+    return int_(r);
 }
 
 // ====== add(box) 编排与容器内定位适配器(2026-10 增补) ======
 // box 是实例对象,直接透传指针,不走 strPtr 字符串提取
-PyValue py_kv_add_box_v(const PyValue* node_id, const PyValue* box, const PyValue* addr) {
-    return py_kv_add_box(strPtr(node_id), strLen(node_id),
+lite::Value kv_add_box_v(const lite::Value* node_id, const lite::Value* box, const lite::Value* addr) {
+    return kv_add_box(strPtr(node_id), strLen(node_id),
                          box,
                          strPtr(addr), strLen(addr));
 }
-PyValue py_kv_locate_v(const PyValue* box) {
-    return py_kv_locate(box);
+lite::Value kv_locate_v(const lite::Value* box) {
+    return kv_locate(box);
 }
-PyValue py_kv_self_v() {
-    return py_kv_self();
+lite::Value kv_self_v() {
+    return kv_self();
 }
 // ====== 节点迭代器适配器(2026-10 增补) ======
-PyValue py_kv_iter_v() {
-    return py_kv_iter();
+lite::Value kv_iter_v() {
+    return kv_iter();
 }
-PyValue py_kv_iter_next_v(const PyValue* it) {
-    return py_kv_iter_next(it);
+lite::Value kv_iter_next_v(const lite::Value* it) {
+    return kv_iter_next(it);
 }
-PyValue py_kv_iter_rewind_v(const PyValue* it) {
-    return py_kv_iter_rewind(it);
+lite::Value kv_iter_rewind_v(const lite::Value* it) {
+    return kv_iter_rewind(it);
 }
-PyValue py_kv_iter_destroy_v(const PyValue* it) {
-    return py_kv_iter_destroy(it);
+lite::Value kv_iter_destroy_v(const lite::Value* it) {
+    return kv_iter_destroy(it);
 }
-PyValue py_kv_iter_live_v() {
-    return py_kv_iter_live();
+lite::Value kv_iter_live_v() {
+    return kv_iter_live();
 }
 // ====== 节点内置 MQ 队列适配器(2026-10 增补) ======
 // 底层队列接口前置声明(kv_queue_api.cpp)
-PyValue py_kv_enqueue(const char*, int64_t, const char*, int64_t);
-PyValue py_kv_dequeue(const char*, int64_t, const char*, int64_t);
-PyValue py_kv_done(const char*, int64_t);
-PyValue py_kv_qlen(const char*, int64_t);
-PyValue py_kv_set_quota(const char*, int64_t, const char*, int64_t);
-PyValue py_kv_quota(const char*, int64_t);
+lite::Value kv_enqueue(const char*, int64_t, const char*, int64_t);
+lite::Value kv_dequeue(const char*, int64_t, const char*, int64_t);
+lite::Value kv_done(const char*, int64_t);
+lite::Value kv_qlen(const char*, int64_t);
+lite::Value kv_set_quota(const char*, int64_t, const char*, int64_t);
+lite::Value kv_quota(const char*, int64_t);
 
-PyValue py_kv_enqueue_v(const PyValue* queue, const PyValue* payload) {
-    return py_kv_enqueue(strPtr(queue), strLen(queue),
+lite::Value kv_enqueue_v(const lite::Value* queue, const lite::Value* payload) {
+    return kv_enqueue(strPtr(queue), strLen(queue),
                          strPtr(payload), strLen(payload));
 }
-PyValue py_kv_dequeue_v(const PyValue* node_id, const PyValue* queue) {
-    return py_kv_dequeue(strPtr(node_id), strLen(node_id),
+lite::Value kv_dequeue_v(const lite::Value* node_id, const lite::Value* queue) {
+    return kv_dequeue(strPtr(node_id), strLen(node_id),
                          strPtr(queue), strLen(queue));
 }
-PyValue py_kv_done_v(const PyValue* node_id) {
-    return py_kv_done(strPtr(node_id), strLen(node_id));
+lite::Value kv_done_v(const lite::Value* node_id) {
+    return kv_done(strPtr(node_id), strLen(node_id));
 }
-PyValue py_kv_qlen_v(const PyValue* queue) {
-    return py_kv_qlen(strPtr(queue), strLen(queue));
+lite::Value kv_qlen_v(const lite::Value* queue) {
+    return kv_qlen(strPtr(queue), strLen(queue));
 }
-PyValue py_kv_set_quota_v(const PyValue* node_id, const PyValue* quota) {
-    return py_kv_set_quota(strPtr(node_id), strLen(node_id),
+lite::Value kv_set_quota_v(const lite::Value* node_id, const lite::Value* quota) {
+    return kv_set_quota(strPtr(node_id), strLen(node_id),
                            strPtr(quota), strLen(quota));
 }
-PyValue py_kv_quota_v(const PyValue* node_id) {
-    return py_kv_quota(strPtr(node_id), strLen(node_id));
+lite::Value kv_quota_v(const lite::Value* node_id) {
+    return kv_quota(strPtr(node_id), strLen(node_id));
 }
 // ====== 通用 KV 读写与本地文件写入适配器(2026-10 增补) ======
-PyValue py_kv_kset(const char*, int64_t, const char*, int64_t);
-PyValue py_kv_kget(const char*, int64_t);
-PyValue py_file_write(const char*, int64_t, const char*, int64_t);
-PyValue py_file_read(const char*, int64_t);
-int64_t py_str_to_int(const char*, int64_t);
-PyValue py_int_to_str(int64_t);
+lite::Value kv_kset(const char*, int64_t, const char*, int64_t);
+lite::Value kv_kget(const char*, int64_t);
+lite::Value file_write(const char*, int64_t, const char*, int64_t);
+lite::Value file_read(const char*, int64_t);
+int64_t str_to_int(const char*, int64_t);
+lite::Value int_to_str(int64_t);
 
-PyValue py_kv_kset_v(const PyValue* key, const PyValue* value) {
-    return py_kv_kset(strPtr(key), strLen(key),
+lite::Value kv_kset_v(const lite::Value* key, const lite::Value* value) {
+    return kv_kset(strPtr(key), strLen(key),
                       strPtr(value), strLen(value));
 }
-PyValue py_kv_kget_v(const PyValue* key) {
-    return py_kv_kget(strPtr(key), strLen(key));
+lite::Value kv_kget_v(const lite::Value* key) {
+    return kv_kget(strPtr(key), strLen(key));
 }
-PyValue py_file_write_v(const PyValue* path, const PyValue* content) {
-    return py_file_write(strPtr(path), strLen(path),
+lite::Value file_write_v(const lite::Value* path, const lite::Value* content) {
+    return file_write(strPtr(path), strLen(path),
                          strPtr(content), strLen(content));
 }
-PyValue py_file_read_v(const PyValue* path) {
-    return py_file_read(strPtr(path), strLen(path));
+lite::Value file_read_v(const lite::Value* path) {
+    return file_read(strPtr(path), strLen(path));
 }
-PyValue py_str_to_int_v(const PyValue* s) {
-    return py_int(py_str_to_int(strPtr(s), strLen(s)));
+lite::Value str_to_int_v(const lite::Value* s) {
+    return int_(str_to_int(strPtr(s), strLen(s)));
 }
-PyValue py_int_to_str_v(const PyValue* v) {
-    int64_t n = (v && v->tag == PY_INT) ? v->as.i : 0;
-    return py_int_to_str(n);
+lite::Value int_to_str_v(const lite::Value* v) {
+    int64_t n = (v && v->tag == lite::kInt) ? v->as.i : 0;
+    return int_to_str(n);
 }
 
 }  // extern "C"

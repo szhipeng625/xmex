@@ -4,7 +4,7 @@
 //   1. 零外部依赖：仅通过 popen 调用系统自带的 curl；
 //   2. 支持 OpenAI 兼容的 chat completions API；
 //   3. 提供神经网络结构描述和修改能力（通过 JSON 中间表示）；
-//   4. 所有操作返回 PyValue，与 PyLite 类型系统无缝对接。
+//   4. 所有操作返回 lite::Value，与 PyLite 类型系统无缝对接。
 #include "pylite/runtime.h"
 
 #include <cstdio>
@@ -125,38 +125,38 @@ char *extractContent(const char *json) {
 //   endpoint     - API 端点，如 "https://api.openai.com/v1/chat/completions"
 //
 // 返回：模型的文本回复
-extern "C" PyValue py_llm_chat(const PyValue *prompt,
-                               const PyValue *systemPrompt,
-                               const PyValue *model,
-                               const PyValue *apiKey,
-                               const PyValue *endpoint) {
-  if (prompt->tag != PY_STR || model->tag != PY_STR ||
-      apiKey->tag != PY_STR || endpoint->tag != PY_STR) {
-    py_runtime_error("llm_chat() 需要字符串参数: prompt, model, api_key, endpoint");
+extern "C" lite::Value llm_chat(const lite::Value *prompt,
+                               const lite::Value *systemPrompt,
+                               const lite::Value *model,
+                               const lite::Value *apiKey,
+                               const lite::Value *endpoint) {
+  if (prompt->tag != lite::kStr || model->tag != lite::kStr ||
+      apiKey->tag != lite::kStr || endpoint->tag != lite::kStr) {
+    runtime_error("llm_chat() 需要字符串参数: prompt, model, api_key, endpoint");
   }
 
-  const char *p = py_str_data(prompt);
-  const char *sp = (systemPrompt->tag == PY_STR) ? py_str_data(systemPrompt) : "";
-  const char *m = py_str_data(model);
-  const char *key = py_str_data(apiKey);
-  const char *ep = py_str_data(endpoint);
+  const char *p = str_data(prompt);
+  const char *sp = (systemPrompt->tag == lite::kStr) ? str_data(systemPrompt) : "";
+  const char *m = str_data(model);
+  const char *key = str_data(apiKey);
+  const char *ep = str_data(endpoint);
 
-  int64_t pLen = py_str_size(prompt);
-  int64_t spLen = (systemPrompt->tag == PY_STR) ? py_str_size(systemPrompt) : 0;
-  int64_t mLen = py_str_size(model);
-  int64_t keyLen = py_str_size(apiKey);
-  int64_t epLen = py_str_size(endpoint);
+  int64_t pLen = str_size(prompt);
+  int64_t spLen = (systemPrompt->tag == lite::kStr) ? str_size(systemPrompt) : 0;
+  int64_t mLen = str_size(model);
+  int64_t keyLen = str_size(apiKey);
+  int64_t epLen = str_size(endpoint);
 
   // JSON 转义用户输入
   char *escPrompt = jsonEscape(p, pLen);
   char *escSystem = spLen > 0 ? jsonEscape(sp, spLen) : nullptr;
 
-  if (!escPrompt) py_runtime_error("内存不足");
+  if (!escPrompt) runtime_error("内存不足");
 
   // 构造 JSON 请求体
   size_t jsonCap = static_cast<size_t>(pLen + spLen + mLen + keyLen + epLen) + 1024;
   char *jsonBody = static_cast<char *>(malloc(jsonCap));
-  if (!jsonBody) { free(escPrompt); free(escSystem); py_runtime_error("内存不足"); }
+  if (!jsonBody) { free(escPrompt); free(escSystem); runtime_error("内存不足"); }
 
   int n = snprintf(jsonBody, jsonCap,
     "{"
@@ -183,7 +183,7 @@ extern "C" PyValue py_llm_chat(const PyValue *prompt,
   // 使用 --data-raw 避免 shell 对 JSON 中特殊字符的二次解释
   size_t cmdCap = jsonCap + keyLen + epLen + 512;
   char *cmd = static_cast<char *>(malloc(cmdCap));
-  if (!cmd) { free(jsonBody); py_runtime_error("内存不足"); }
+  if (!cmd) { free(jsonBody); runtime_error("内存不足"); }
 
   snprintf(cmd, cmdCap,
     "curl -s -X POST '%.*s' "
@@ -201,16 +201,16 @@ extern "C" PyValue py_llm_chat(const PyValue *prompt,
 
   if (!response || strlen(response) == 0) {
     free(response);
-    py_runtime_error("LLM API 调用失败: 无响应");
+    runtime_error("LLM API 调用失败: 无响应");
   }
 
   // 检查错误响应
   if (strstr(response, "\"error\"")) {
-    PyValue err = py_str_new(response, static_cast<int64_t>(strlen(response)));
+    lite::Value err = str_new(response, static_cast<int64_t>(strlen(response)));
     free(response);
     char errBuf[1024];
-    snprintf(errBuf, sizeof(errBuf), "LLM API 返回错误: %s", py_str_data(&err));
-    py_runtime_error(errBuf);
+    snprintf(errBuf, sizeof(errBuf), "LLM API 返回错误: %s", str_data(&err));
+    runtime_error(errBuf);
   }
 
   // 提取 content 字段
@@ -219,12 +219,12 @@ extern "C" PyValue py_llm_chat(const PyValue *prompt,
     // 如果解析失败，返回原始响应（截断到合理长度）
     int64_t respLen = static_cast<int64_t>(strlen(response));
     if (respLen > 2000) respLen = 2000;
-    PyValue result = py_str_new(response, respLen);
+    lite::Value result = str_new(response, respLen);
     free(response);
     return result;
   }
 
-  PyValue result = py_str_new(content, static_cast<int64_t>(strlen(content)));
+  lite::Value result = str_new(content, static_cast<int64_t>(strlen(content)));
   free(response);
   free(content);
   return result;
@@ -239,27 +239,27 @@ extern "C" PyValue py_llm_chat(const PyValue *prompt,
 //    {"type":"linear","in":256,"out":10}]
 //
 // 返回完整的网络描述 JSON 字符串。
-extern "C" PyValue py_llm_create_network(const PyValue *name,
-                                          const PyValue *layers) {
-  if (name->tag != PY_STR || layers->tag != PY_STR) {
-    py_runtime_error("llm_create_network() 需要两个字符串参数: name, layers");
+extern "C" lite::Value llm_create_network(const lite::Value *name,
+                                          const lite::Value *layers) {
+  if (name->tag != lite::kStr || layers->tag != lite::kStr) {
+    runtime_error("llm_create_network() 需要两个字符串参数: name, layers");
   }
 
-  const char *n = py_str_data(name);
-  const char *l = py_str_data(layers);
-  int64_t nLen = py_str_size(name);
-  int64_t lLen = py_str_size(layers);
+  const char *n = str_data(name);
+  const char *l = str_data(layers);
+  int64_t nLen = str_size(name);
+  int64_t lLen = str_size(layers);
 
   size_t cap = static_cast<size_t>(nLen + lLen) + 128;
   char *json = static_cast<char *>(malloc(cap));
-  if (!json) py_runtime_error("内存不足");
+  if (!json) runtime_error("内存不足");
 
   snprintf(json, cap,
     "{\"name\":\"%.*s\",\"layers\":%.*s}",
     static_cast<int>(nLen), n,
     static_cast<int>(lLen), l);
 
-  PyValue result = py_str_new(json, static_cast<int64_t>(strlen(json)));
+  lite::Value result = str_new(json, static_cast<int64_t>(strlen(json)));
   free(json);
   return result;
 }
@@ -268,35 +268,35 @@ extern "C" PyValue py_llm_create_network(const PyValue *name,
 // 向已有网络描述中添加一层。
 //
 // 返回修改后的网络描述 JSON 字符串。
-extern "C" PyValue py_llm_add_layer(const PyValue *network,
-                                     const PyValue *layer) {
-  if (network->tag != PY_STR || layer->tag != PY_STR) {
-    py_runtime_error("llm_add_layer() 需要两个字符串参数: network, layer");
+extern "C" lite::Value llm_add_layer(const lite::Value *network,
+                                     const lite::Value *layer) {
+  if (network->tag != lite::kStr || layer->tag != lite::kStr) {
+    runtime_error("llm_add_layer() 需要两个字符串参数: network, layer");
   }
 
-  const char *net = py_str_data(network);
-  const char *lay = py_str_data(layer);
-  int64_t netLen = py_str_size(network);
-  int64_t layLen = py_str_size(layer);
+  const char *net = str_data(network);
+  const char *lay = str_data(layer);
+  int64_t netLen = str_size(network);
+  int64_t layLen = str_size(layer);
 
   // 在最后一个 ] 之前插入新层
   // 简单实现：找到 "layers":[ 后面的内容，在最后的 ] 前插入
   const char *layersStart = strstr(net, "\"layers\":[");
   if (!layersStart) {
-    py_runtime_error("llm_add_layer() 失败: 无效的网络描述格式");
+    runtime_error("llm_add_layer() 失败: 无效的网络描述格式");
   }
 
   // 找到 layers 数组的结束 ]
   const char *arrStart = strchr(layersStart, '[');
   if (!arrStart) {
-    py_runtime_error("llm_add_layer() 失败: 无效的网络描述格式");
+    runtime_error("llm_add_layer() 失败: 无效的网络描述格式");
   }
 
   // 从后往前找最后一个 ]
   const char *end = net + netLen - 1;
   while (end > arrStart && *end != ']') end--;
   if (end <= arrStart) {
-    py_runtime_error("llm_add_layer() 失败: 无效的网络描述格式");
+    runtime_error("llm_add_layer() 失败: 无效的网络描述格式");
   }
 
   // 构造新 JSON：前缀 + 逗号 + 新层 + 后缀
@@ -308,7 +308,7 @@ extern "C" PyValue py_llm_add_layer(const PyValue *network,
 
   size_t cap = prefixLen + static_cast<size_t>(layLen) + suffixLen + 4;
   char *newJson = static_cast<char *>(malloc(cap));
-  if (!newJson) py_runtime_error("内存不足");
+  if (!newJson) runtime_error("内存不足");
 
   if (isEmpty) {
     snprintf(newJson, cap, "%.*s%.*s%.*s",
@@ -322,7 +322,7 @@ extern "C" PyValue py_llm_add_layer(const PyValue *network,
              static_cast<int>(suffixLen), end);
   }
 
-  PyValue result = py_str_new(newJson, static_cast<int64_t>(strlen(newJson)));
+  lite::Value result = str_new(newJson, static_cast<int64_t>(strlen(newJson)));
   free(newJson);
   return result;
 }
@@ -331,15 +331,15 @@ extern "C" PyValue py_llm_add_layer(const PyValue *network,
 // 从网络描述中移除指定索引的层（从 0 开始）。
 //
 // 返回修改后的网络描述 JSON 字符串。
-extern "C" PyValue py_llm_remove_layer(const PyValue *network,
-                                        const PyValue *index) {
-  if (network->tag != PY_STR || index->tag != PY_INT) {
-    py_runtime_error("llm_remove_layer() 需要 (str, int) 参数");
+extern "C" lite::Value llm_remove_layer(const lite::Value *network,
+                                        const lite::Value *index) {
+  if (network->tag != lite::kStr || index->tag != lite::kInt) {
+    runtime_error("llm_remove_layer() 需要 (str, int) 参数");
   }
 
   // 这个功能比较复杂，需要完整的 JSON 解析。
   // 当前版本返回错误提示，建议用户用 llm_create_network 重建。
-  py_runtime_error(
+  runtime_error(
     "llm_remove_layer() 暂未实现。"
     "建议使用 llm_create_network() 重新构建网络描述，"
     "或使用 llm_add_layer() 逐层构建。");
@@ -347,26 +347,26 @@ extern "C" PyValue py_llm_remove_layer(const PyValue *network,
 
 // llm_network_summary(network: str) -> str
 // 生成网络结构的可读摘要。
-extern "C" PyValue py_llm_network_summary(const PyValue *network) {
-  if (network->tag != PY_STR) {
-    py_runtime_error("llm_network_summary() 需要一个字符串参数: network");
+extern "C" lite::Value llm_network_summary(const lite::Value *network) {
+  if (network->tag != lite::kStr) {
+    runtime_error("llm_network_summary() 需要一个字符串参数: network");
   }
 
   // 直接返回网络描述本身作为摘要
   // 未来可以扩展为解析 JSON 并生成格式化的表格
-  const char *net = py_str_data(network);
-  int64_t netLen = py_str_size(network);
+  const char *net = str_data(network);
+  int64_t netLen = str_size(network);
 
   size_t cap = static_cast<size_t>(netLen) + 256;
   char *summary = static_cast<char *>(malloc(cap));
-  if (!summary) py_runtime_error("内存不足");
+  if (!summary) runtime_error("内存不足");
 
   snprintf(summary, cap,
     "[PyLite 神经网络描述]\n%.*s\n\n"
     "提示: 使用 llm_add_layer() 添加层，使用 llm_chat() 调用推理 API。",
     static_cast<int>(netLen), net);
 
-  PyValue result = py_str_new(summary, static_cast<int64_t>(strlen(summary)));
+  lite::Value result = str_new(summary, static_cast<int64_t>(strlen(summary)));
   free(summary);
   return result;
 }
@@ -385,16 +385,16 @@ extern "C" PyValue py_llm_network_summary(const PyValue *network) {
 // system_prompt 是可选的系统提示词（可为空字符串）。
 //
 // 返回 JSONL 格式的训练数据字符串（每行一个 JSON 对象）。
-extern "C" PyValue py_llm_create_dataset(const PyValue *examples,
-                                          const PyValue *systemPrompt) {
-  if (examples->tag != PY_STR) {
-    py_runtime_error("llm_create_dataset() 需要字符串参数: examples (JSON 数组)");
+extern "C" lite::Value llm_create_dataset(const lite::Value *examples,
+                                          const lite::Value *systemPrompt) {
+  if (examples->tag != lite::kStr) {
+    runtime_error("llm_create_dataset() 需要字符串参数: examples (JSON 数组)");
   }
 
-  const char *ex = py_str_data(examples);
-  int64_t exLen = py_str_size(examples);
-  const char *sp = (systemPrompt->tag == PY_STR) ? py_str_data(systemPrompt) : "";
-  int64_t spLen = (systemPrompt->tag == PY_STR) ? py_str_size(systemPrompt) : 0;
+  const char *ex = str_data(examples);
+  int64_t exLen = str_size(examples);
+  const char *sp = (systemPrompt->tag == lite::kStr) ? str_data(systemPrompt) : "";
+  int64_t spLen = (systemPrompt->tag == lite::kStr) ? str_size(systemPrompt) : 0;
 
   // 简单解析 JSON 数组：按 {"input": 分割每个示例
   // 构造 JSONL 格式：每行 {"messages":[{"role":"system","content":"..."},
@@ -403,7 +403,7 @@ extern "C" PyValue py_llm_create_dataset(const PyValue *examples,
 
   size_t cap = static_cast<size_t>(exLen + spLen) * 3 + 4096;
   char *jsonl = static_cast<char *>(malloc(cap));
-  if (!jsonl) py_runtime_error("内存不足");
+  if (!jsonl) runtime_error("内存不足");
 
   size_t pos = 0;
   const char *p = ex;
@@ -491,7 +491,7 @@ extern "C" PyValue py_llm_create_dataset(const PyValue *examples,
   }
 
   jsonl[pos] = '\0';
-  PyValue result = py_str_new(jsonl, static_cast<int64_t>(pos));
+  lite::Value result = str_new(jsonl, static_cast<int64_t>(pos));
   free(jsonl);
   return result;
 }
@@ -502,24 +502,24 @@ extern "C" PyValue py_llm_create_dataset(const PyValue *examples,
 // endpoint 是 files API 端点，如 "https://api.openai.com/v1/files"
 //
 // 返回文件 ID 字符串。
-extern "C" PyValue py_llm_upload_file(const PyValue *data,
-                                       const PyValue *filename,
-                                       const PyValue *apiKey,
-                                       const PyValue *endpoint) {
-  if (data->tag != PY_STR || filename->tag != PY_STR ||
-      apiKey->tag != PY_STR || endpoint->tag != PY_STR) {
-    py_runtime_error("llm_upload_file() 需要四个字符串参数");
+extern "C" lite::Value llm_upload_file(const lite::Value *data,
+                                       const lite::Value *filename,
+                                       const lite::Value *apiKey,
+                                       const lite::Value *endpoint) {
+  if (data->tag != lite::kStr || filename->tag != lite::kStr ||
+      apiKey->tag != lite::kStr || endpoint->tag != lite::kStr) {
+    runtime_error("llm_upload_file() 需要四个字符串参数");
   }
 
-  const char *d = py_str_data(data);
-  const char *fn = py_str_data(filename);
-  const char *key = py_str_data(apiKey);
-  const char *ep = py_str_data(endpoint);
+  const char *d = str_data(data);
+  const char *fn = str_data(filename);
+  const char *key = str_data(apiKey);
+  const char *ep = str_data(endpoint);
 
-  int64_t dLen = py_str_size(data);
-  int64_t fnLen = py_str_size(filename);
-  int64_t keyLen = py_str_size(apiKey);
-  int64_t epLen = py_str_size(endpoint);
+  int64_t dLen = str_size(data);
+  int64_t fnLen = str_size(filename);
+  int64_t keyLen = str_size(apiKey);
+  int64_t epLen = str_size(endpoint);
 
   // 将数据写入临时文件
   char tmpPath[256];
@@ -527,14 +527,14 @@ extern "C" PyValue py_llm_upload_file(const PyValue *data,
            static_cast<int>(fnLen), fn);
 
   FILE *fp = fopen(tmpPath, "w");
-  if (!fp) py_runtime_error("llm_upload_file() 失败: 无法创建临时文件");
+  if (!fp) runtime_error("llm_upload_file() 失败: 无法创建临时文件");
   fwrite(d, 1, static_cast<size_t>(dLen), fp);
   fclose(fp);
 
   // 构造 curl 命令上传文件
   size_t cmdCap = static_cast<size_t>(epLen + keyLen + fnLen) + 512;
   char *cmd = static_cast<char *>(malloc(cmdCap));
-  if (!cmd) py_runtime_error("内存不足");
+  if (!cmd) runtime_error("内存不足");
 
   snprintf(cmd, cmdCap,
     "curl -s -X POST '%.*s' "
@@ -551,7 +551,7 @@ extern "C" PyValue py_llm_upload_file(const PyValue *data,
 
   if (!response || strlen(response) == 0) {
     free(response);
-    py_runtime_error("文件上传失败: 无响应");
+    runtime_error("文件上传失败: 无响应");
   }
 
   // 提取文件 ID
@@ -574,12 +574,12 @@ extern "C" PyValue py_llm_upload_file(const PyValue *data,
 
   if (!fileId) {
     // 返回原始响应作为错误信息
-    PyValue result = py_str_new(response, static_cast<int64_t>(strlen(response)));
+    lite::Value result = str_new(response, static_cast<int64_t>(strlen(response)));
     free(response);
     return result;
   }
 
-  PyValue result = py_str_new(fileId, static_cast<int64_t>(strlen(fileId)));
+  lite::Value result = str_new(fileId, static_cast<int64_t>(strlen(fileId)));
   free(response);
   free(fileId);
   return result;
@@ -592,32 +592,32 @@ extern "C" PyValue py_llm_upload_file(const PyValue *data,
 // endpoint 是 fine-tunes API 端点，如 "https://api.openai.com/v1/fine_tuning/jobs"
 //
 // 返回微调任务 ID 字符串。
-extern "C" PyValue py_llm_create_finetune(const PyValue *fileId,
-                                           const PyValue *model,
-                                           const PyValue *suffix,
-                                           const PyValue *apiKey,
-                                           const PyValue *endpoint) {
-  if (fileId->tag != PY_STR || model->tag != PY_STR ||
-      apiKey->tag != PY_STR || endpoint->tag != PY_STR) {
-    py_runtime_error("llm_create_finetune() 需要字符串参数: file_id, model, api_key, endpoint");
+extern "C" lite::Value llm_create_finetune(const lite::Value *fileId,
+                                           const lite::Value *model,
+                                           const lite::Value *suffix,
+                                           const lite::Value *apiKey,
+                                           const lite::Value *endpoint) {
+  if (fileId->tag != lite::kStr || model->tag != lite::kStr ||
+      apiKey->tag != lite::kStr || endpoint->tag != lite::kStr) {
+    runtime_error("llm_create_finetune() 需要字符串参数: file_id, model, api_key, endpoint");
   }
 
-  const char *fid = py_str_data(fileId);
-  const char *m = py_str_data(model);
-  const char *suf = (suffix->tag == PY_STR) ? py_str_data(suffix) : "pylite-model";
-  const char *key = py_str_data(apiKey);
-  const char *ep = py_str_data(endpoint);
+  const char *fid = str_data(fileId);
+  const char *m = str_data(model);
+  const char *suf = (suffix->tag == lite::kStr) ? str_data(suffix) : "pylite-model";
+  const char *key = str_data(apiKey);
+  const char *ep = str_data(endpoint);
 
-  int64_t fidLen = py_str_size(fileId);
-  int64_t mLen = py_str_size(model);
-  int64_t sufLen = (suffix->tag == PY_STR) ? py_str_size(suffix) : 11;
-  int64_t keyLen = py_str_size(apiKey);
-  int64_t epLen = py_str_size(endpoint);
+  int64_t fidLen = str_size(fileId);
+  int64_t mLen = str_size(model);
+  int64_t sufLen = (suffix->tag == lite::kStr) ? str_size(suffix) : 11;
+  int64_t keyLen = str_size(apiKey);
+  int64_t epLen = str_size(endpoint);
 
   // 构造 JSON 请求体
   size_t jsonCap = static_cast<size_t>(fidLen + mLen + sufLen) + 256;
   char *jsonBody = static_cast<char *>(malloc(jsonCap));
-  if (!jsonBody) py_runtime_error("内存不足");
+  if (!jsonBody) runtime_error("内存不足");
 
   snprintf(jsonBody, jsonCap,
     "{\"training_file\":\"%.*s\","
@@ -630,7 +630,7 @@ extern "C" PyValue py_llm_create_finetune(const PyValue *fileId,
   // 构造 curl 命令
   size_t cmdCap = jsonCap + static_cast<size_t>(epLen + keyLen) + 256;
   char *cmd = static_cast<char *>(malloc(cmdCap));
-  if (!cmd) { free(jsonBody); py_runtime_error("内存不足"); }
+  if (!cmd) { free(jsonBody); runtime_error("内存不足"); }
 
   snprintf(cmd, cmdCap,
     "curl -s -X POST '%.*s' "
@@ -648,7 +648,7 @@ extern "C" PyValue py_llm_create_finetune(const PyValue *fileId,
 
   if (!response || strlen(response) == 0) {
     free(response);
-    py_runtime_error("微调任务创建失败: 无响应");
+    runtime_error("微调任务创建失败: 无响应");
   }
 
   // 提取任务 ID
@@ -670,12 +670,12 @@ extern "C" PyValue py_llm_create_finetune(const PyValue *fileId,
   }
 
   if (!jobId) {
-    PyValue result = py_str_new(response, static_cast<int64_t>(strlen(response)));
+    lite::Value result = str_new(response, static_cast<int64_t>(strlen(response)));
     free(response);
     return result;
   }
 
-  PyValue result = py_str_new(jobId, static_cast<int64_t>(strlen(jobId)));
+  lite::Value result = str_new(jobId, static_cast<int64_t>(strlen(jobId)));
   free(response);
   free(jobId);
   return result;
@@ -686,25 +686,25 @@ extern "C" PyValue py_llm_create_finetune(const PyValue *fileId,
 //
 // endpoint 格式: "https://api.openai.com/v1/fine_tuning/jobs/{job_id}"
 // 如果 endpoint 不含 {job_id}，会自动拼接。
-extern "C" PyValue py_llm_finetune_status(const PyValue *jobId,
-                                           const PyValue *apiKey,
-                                           const PyValue *endpoint) {
-  if (jobId->tag != PY_STR || apiKey->tag != PY_STR || endpoint->tag != PY_STR) {
-    py_runtime_error("llm_finetune_status() 需要三个字符串参数");
+extern "C" lite::Value llm_finetune_status(const lite::Value *jobId,
+                                           const lite::Value *apiKey,
+                                           const lite::Value *endpoint) {
+  if (jobId->tag != lite::kStr || apiKey->tag != lite::kStr || endpoint->tag != lite::kStr) {
+    runtime_error("llm_finetune_status() 需要三个字符串参数");
   }
 
-  const char *jid = py_str_data(jobId);
-  const char *key = py_str_data(apiKey);
-  const char *ep = py_str_data(endpoint);
+  const char *jid = str_data(jobId);
+  const char *key = str_data(apiKey);
+  const char *ep = str_data(endpoint);
 
-  int64_t jidLen = py_str_size(jobId);
-  int64_t keyLen = py_str_size(apiKey);
-  int64_t epLen = py_str_size(endpoint);
+  int64_t jidLen = str_size(jobId);
+  int64_t keyLen = str_size(apiKey);
+  int64_t epLen = str_size(endpoint);
 
   // 构造 curl 命令
   size_t cmdCap = static_cast<size_t>(epLen + jidLen + keyLen) + 256;
   char *cmd = static_cast<char *>(malloc(cmdCap));
-  if (!cmd) py_runtime_error("内存不足");
+  if (!cmd) runtime_error("内存不足");
 
   // 如果 endpoint 不含 job_id，自动拼接
   if (strstr(ep, "{job_id}") || strstr(ep, "%s")) {
@@ -727,30 +727,30 @@ extern "C" PyValue py_llm_finetune_status(const PyValue *jobId,
 
   if (!response || strlen(response) == 0) {
     free(response);
-    py_runtime_error("微调状态查询失败: 无响应");
+    runtime_error("微调状态查询失败: 无响应");
   }
 
-  PyValue result = py_str_new(response, static_cast<int64_t>(strlen(response)));
+  lite::Value result = str_new(response, static_cast<int64_t>(strlen(response)));
   free(response);
   return result;
 }
 
 // llm_list_finetunes(api_key: str, endpoint: str) -> str
 // 列出所有微调任务。
-extern "C" PyValue py_llm_list_finetunes(const PyValue *apiKey,
-                                          const PyValue *endpoint) {
-  if (apiKey->tag != PY_STR || endpoint->tag != PY_STR) {
-    py_runtime_error("llm_list_finetunes() 需要两个字符串参数");
+extern "C" lite::Value llm_list_finetunes(const lite::Value *apiKey,
+                                          const lite::Value *endpoint) {
+  if (apiKey->tag != lite::kStr || endpoint->tag != lite::kStr) {
+    runtime_error("llm_list_finetunes() 需要两个字符串参数");
   }
 
-  const char *key = py_str_data(apiKey);
-  const char *ep = py_str_data(endpoint);
-  int64_t keyLen = py_str_size(apiKey);
-  int64_t epLen = py_str_size(endpoint);
+  const char *key = str_data(apiKey);
+  const char *ep = str_data(endpoint);
+  int64_t keyLen = str_size(apiKey);
+  int64_t epLen = str_size(endpoint);
 
   size_t cmdCap = static_cast<size_t>(epLen + keyLen) + 256;
   char *cmd = static_cast<char *>(malloc(cmdCap));
-  if (!cmd) py_runtime_error("内存不足");
+  if (!cmd) runtime_error("内存不足");
 
   snprintf(cmd, cmdCap,
     "curl -s -X GET '%.*s' "
@@ -763,10 +763,10 @@ extern "C" PyValue py_llm_list_finetunes(const PyValue *apiKey,
 
   if (!response || strlen(response) == 0) {
     free(response);
-    py_runtime_error("微调列表查询失败: 无响应");
+    runtime_error("微调列表查询失败: 无响应");
   }
 
-  PyValue result = py_str_new(response, static_cast<int64_t>(strlen(response)));
+  lite::Value result = str_new(response, static_cast<int64_t>(strlen(response)));
   free(response);
   return result;
 }

@@ -1,95 +1,83 @@
-// PyValue —— PyLite 的通用运行时值表示。
+// Value —— 通用运行时值表示。
 //
-// 这是整个项目的 ABI 基石:运行时库(由 GCC 编译)、IRGen 生成的代码
-// (由 LLVM 降低)、以及用户手写的 C++ 三方都按这份布局交换数据。
-// 改动这里的任何字段都会破坏已编译的目标文件,务必谨慎。
-//
-// 布局必须与 LLVM 侧的 `StructType::create(ctx, {i32, i64}, "PyValue")` 逐字节一致:
-//   offset 0: tag (i32)
-//   offset 4: 填充
-//   offset 8: payload (i64)
-// 总计 16 字节,对齐 8。
+// ABI 基石：运行时、生成的代码、手写 C++ 三方都按这份布局交换数据。
+// 布局必须与 LLVM 侧 {i32, i64} 逐字节一致，总计 16 字节、对齐 8。
 #pragma once
 
 #include <cstdint>
 #include <cstddef>
 
-enum PyTag : int32_t {
-  PY_NULL   = 0,
-  PY_BOOL   = 1,
-  PY_INT    = 2,
-  PY_FLOAT  = 3,
-  PY_STR    = 4,
-  PY_LIST   = 5,
-  PY_DICT   = 6,
-  PY_TUPLE  = 7,
-  // 闭包:payload 指向 PyClosure(函数指针 + 捕获的环境)。
-  // 只新增一个种类编号,**不改变 PyValue 的大小与字段偏移**(tag 仍是 i32,
-  // union 里本就有指针),所以已编译的目标文件不受影响。
-  PY_FUNC   = 8,
-  // 类实例:payload 指向 PyInstance(类标识 + 属性表)。
-  // 同样只新增编号,PyValue 的大小与字段偏移不变。
-  PY_INSTANCE = 9,
+namespace lite {
+
+enum Tag : int32_t {
+  kNull     = 0,
+  kBool     = 1,
+  kInt      = 2,
+  kFloat    = 3,
+  kStr      = 4,
+  kList     = 5,
+  kDict     = 6,
+  kTuple    = 7,
+  kFunc     = 8,
+  kInstance = 9,
 };
 
-struct PyStr;
-struct PyList;
-struct PyDict;
-struct PyTuple;
+struct Str;
+struct List;
+struct Dict;
+struct Tuple;
 
-struct PyValue {
+struct Value {
   int32_t tag;
   union {
     int64_t i;
     double  f;
-    void   *ptr;  // PyStr* | PyList* | PyDict* | PyTuple*
+    void   *ptr;
   } as;
 };
 
-// 这两个断言是 ABI 契约的一部分。如果哪天它们在某个平台上失败,
-// 说明 LLVM 侧的 StructType 也必须跟着改,而不是改这两个数字。
-static_assert(sizeof(PyValue) == 16, "PyValue layout is part of the ABI");
-static_assert(alignof(PyValue) == 8, "PyValue layout is part of the ABI");
+static_assert(sizeof(Value) == 16, "Value layout is part of the ABI");
+static_assert(alignof(Value) == 8, "Value layout is part of the ABI");
 
-// 构造函数刻意不用 C++20 的指定初始化器:union 成员用显式赋值更不容易写错,
-// 也避免不同标准版本下的聚合初始化歧义。
-inline PyValue py_none() {
-  PyValue r;
-  r.tag = PY_NULL;
+}  // namespace lite
+
+// 构造函数与取值辅助放在全局作用域，调用处不必写命名空间限定。
+inline lite::Value none_() {
+  lite::Value r;
+  r.tag = lite::kNull;
   r.as.i = 0;
   return r;
 }
 
-inline PyValue py_int(int64_t v) {
-  PyValue r;
-  r.tag = PY_INT;
+inline lite::Value int_(int64_t v) {
+  lite::Value r;
+  r.tag = lite::kInt;
   r.as.i = v;
   return r;
 }
 
-inline PyValue py_float(double v) {
-  PyValue r;
-  r.tag = PY_FLOAT;
+inline lite::Value float_(double v) {
+  lite::Value r;
+  r.tag = lite::kFloat;
   r.as.f = v;
   return r;
 }
 
-inline PyValue py_bool(bool v) {
-  PyValue r;
-  r.tag = PY_BOOL;
+inline lite::Value bool_(bool v) {
+  lite::Value r;
+  r.tag = lite::kBool;
   r.as.i = v ? 1 : 0;
   return r;
 }
 
-inline PyValue py_ptr(int32_t tag, void *p) {
-  PyValue r;
+inline lite::Value ptr(int32_t tag, void *p) {
+  lite::Value r;
   r.tag = tag;
   r.as.ptr = p;
   return r;
 }
 
-// 取值辅助。调用方负责确认 tag 正确 —— v1 不做隐式类型检查。
-inline int64_t py_as_int(PyValue v)   { return v.as.i; }
-inline double  py_as_float(PyValue v) { return v.as.f; }
-inline bool    py_as_bool(PyValue v)  { return v.as.i != 0; }
-inline void   *py_as_ptr(PyValue v)   { return v.as.ptr; }
+inline int64_t as_int(lite::Value v)   { return v.as.i; }
+inline double  as_float(lite::Value v) { return v.as.f; }
+inline bool    as_bool(lite::Value v)  { return v.as.i != 0; }
+inline void   *as_ptr(lite::Value v)   { return v.as.ptr; }

@@ -135,14 +135,14 @@ void freeKVPage(int pageId) {
 
 // engine_init(config_json: str) -> str
 // 初始化推理引擎，配置模型参数。
-extern "C" PyValue py_engine_init(const PyValue *configJson) {
+extern "C" lite::Value engine_init(const lite::Value *configJson) {
   if (g_engine.initialized) {
-    return py_str_new("{\"status\":\"already_initialized\"}", 32);
+    return str_new("{\"status\":\"already_initialized\"}", 32);
   }
 
   // 从配置 JSON 解析模型参数（简化版：使用默认 Qwen2 配置）
-  if (configJson->tag == PY_STR) {
-    const char *json = py_str_data(configJson);
+  if (configJson->tag == lite::kStr) {
+    const char *json = str_data(configJson);
     // 简单解析关键参数
     auto getInt = [json](const char *key, int def) -> int {
       char search[64];
@@ -202,7 +202,7 @@ extern "C" PyValue py_engine_init(const PyValue *configJson) {
     g_engine.numKVHeads, g_engine.headDim, g_engine.vocabSize,
     KV_PAGE_SIZE, g_engine.totalPages, MAX_BATCH_SIZE, MAX_SEQ_LEN, cacheMB);
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // ===========================================================================
@@ -214,28 +214,28 @@ extern "C" PyValue py_engine_init(const PyValue *configJson) {
 // 添加推理请求到批处理队列。
 //
 // 返回请求 ID。
-extern "C" PyValue py_engine_add_request(const PyValue *prompt,
-                                          const PyValue *maxTokens,
-                                          const PyValue *temperature,
-                                          const PyValue *topP,
-                                          const PyValue *topK) {
+extern "C" lite::Value engine_add_request(const lite::Value *prompt,
+                                          const lite::Value *maxTokens,
+                                          const lite::Value *temperature,
+                                          const lite::Value *topP,
+                                          const lite::Value *topK) {
   if (!g_engine.initialized) {
-    py_runtime_error("引擎未初始化，请先调用 engine_init()");
+    runtime_error("引擎未初始化，请先调用 engine_init()");
   }
 
   InferenceRequest req;
   req.requestId = g_engine.nextRequestId++;
-  req.maxTokens = (maxTokens->tag == PY_INT) ? static_cast<int>(py_as_int(*maxTokens)) : 256;
-  req.temperature = (temperature->tag == PY_FLOAT) ? py_as_float(*temperature) : 0.7f;
-  req.topP = (topP->tag == PY_FLOAT) ? static_cast<float>(py_as_float(*topP)) : 0.9f;
-  req.topK = (topK->tag == PY_INT) ? static_cast<int>(py_as_int(*topK)) : 50;
+  req.maxTokens = (maxTokens->tag == lite::kInt) ? static_cast<int>(as_int(*maxTokens)) : 256;
+  req.temperature = (temperature->tag == lite::kFloat) ? as_float(*temperature) : 0.7f;
+  req.topP = (topP->tag == lite::kFloat) ? static_cast<float>(as_float(*topP)) : 0.9f;
+  req.topK = (topK->tag == lite::kInt) ? static_cast<int>(as_int(*topK)) : 50;
   req.finished = false;
   req.outputLen = 0;
 
   // 模拟 tokenize（实际需要调用 tokenizer）
-  if (prompt->tag == PY_STR) {
-    const char *p = py_str_data(prompt);
-    int64_t pLen = py_str_size(prompt);
+  if (prompt->tag == lite::kStr) {
+    const char *p = str_data(prompt);
+    int64_t pLen = str_size(prompt);
     req.promptLen = static_cast<int>(pLen);
     // 简化：每个字符作为一个 token
     for (int64_t i = 0; i < pLen; ++i) {
@@ -250,7 +250,7 @@ extern "C" PyValue py_engine_add_request(const PyValue *prompt,
     if (pageId < 0) {
       // 内存不足，释放已分配的页
       for (int pid : req.kvPageIds) freeKVPage(pid);
-      py_runtime_error("KV Cache 内存不足，请等待其他请求完成");
+      runtime_error("KV Cache 内存不足，请等待其他请求完成");
     }
     req.kvPageIds.push_back(pageId);
   }
@@ -263,7 +263,7 @@ extern "C" PyValue py_engine_add_request(const PyValue *prompt,
     "{\"request_id\":%d,\"status\":\"queued\",\"max_tokens\":%d}",
     req.requestId, req.maxTokens);
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // ===========================================================================
@@ -274,9 +274,9 @@ extern "C" PyValue py_engine_add_request(const PyValue *prompt,
 // 执行一步批处理推理（处理所有活跃请求的一个 token）。
 //
 // 返回当前批处理状态。
-extern "C" PyValue py_engine_step() {
+extern "C" lite::Value engine_step() {
   if (!g_engine.initialized) {
-    py_runtime_error("引擎未初始化");
+    runtime_error("引擎未初始化");
   }
 
   // 将等待队列中的请求加入活跃队列
@@ -287,7 +287,7 @@ extern "C" PyValue py_engine_step() {
   }
 
   if (g_engine.activeRequests.empty()) {
-    return py_str_new("{\"status\":\"idle\",\"active_requests\":0}", 38);
+    return str_new("{\"status\":\"idle\",\"active_requests\":0}", 38);
   }
 
   // 处理每个活跃请求的一个 token
@@ -328,7 +328,7 @@ extern "C" PyValue py_engine_step() {
     g_engine.activeRequests.size(), g_engine.pendingRequests.size(),
     finishedCount, g_engine.totalTokensGenerated, g_engine.freePages.size());
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // ===========================================================================
@@ -337,9 +337,9 @@ extern "C" PyValue py_engine_step() {
 
 // engine_status() -> str
 // 返回引擎运行状态和性能统计。
-extern "C" PyValue py_engine_status() {
+extern "C" lite::Value engine_status() {
   if (!g_engine.initialized) {
-    return py_str_new("{\"status\":\"not_initialized\"}", 28);
+    return str_new("{\"status\":\"not_initialized\"}", 28);
   }
 
   int activeCount = 0, finishedCount = 0;
@@ -378,7 +378,7 @@ extern "C" PyValue py_engine_status() {
     g_engine.totalPages > 0 ?
       (1.0 - static_cast<double>(g_engine.freePages.size()) / g_engine.totalPages) * 100.0 : 0.0);
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // ===========================================================================
@@ -387,7 +387,7 @@ extern "C" PyValue py_engine_status() {
 
 // engine_reset() -> None
 // 重置引擎状态，释放所有资源。
-extern "C" void py_engine_reset() {
+extern "C" void engine_reset() {
   // 释放所有 KV Cache 页
   for (auto &page : g_engine.kvPages) {
     free(page.k);  // k 和 v 是连续分配的
@@ -416,18 +416,18 @@ extern "C" void py_engine_reset() {
 // 一键启动完整的推理服务：初始化引擎 + 启动 HTTP 服务。
 //
 // 这是 engine_init + server_start 的组合快捷方式。
-extern "C" PyValue py_engine_serve(const PyValue *port) {
+extern "C" lite::Value engine_serve(const lite::Value *port) {
   // 初始化引擎（使用默认 Qwen2 配置）
   if (!g_engine.initialized) {
-    PyValue nullConfig = py_str_new("{}", 2);
-    py_engine_init(&nullConfig);
+    lite::Value nullConfig = str_new("{}", 2);
+    engine_init(&nullConfig);
   }
 
   // 启动 HTTP 服务
-  PyValue result = py_server_start(port);
+  lite::Value result = server_start(port);
 
-  const char *serverInfo = py_str_data(&result);
-  int64_t serverLen = py_str_size(&result);
+  const char *serverInfo = str_data(&result);
+  int64_t serverLen = str_size(&result);
 
   int kvDim = g_engine.headDim * g_engine.numKVHeads;
   double cacheMB = static_cast<double>(g_engine.totalPages) *
@@ -458,5 +458,5 @@ extern "C" PyValue py_engine_serve(const PyValue *port) {
     static_cast<int>(serverLen), serverInfo,
     g_engine.initialized ? 8080 : 0);
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }

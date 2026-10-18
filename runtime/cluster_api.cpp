@@ -3,9 +3,9 @@
 #include <cstring>
 #include <sstream>
 
-extern "C" void py_trace_op(const char *category, const char *op,
+extern "C" void trace_op(const char *category, const char *op,
                             const char *detail, int ok, int64_t elapsed);
-extern "C" int32_t py_trace_enabled();
+extern "C" int32_t trace_enabled();
 #include <chrono>
 static int64_t traceNowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -18,7 +18,7 @@ extern "C" {
 // ============================================================================
 
 // cluster.connect(name, addr, secret) → 连接到远程集群
-PyValue py_cluster_connect(const char *name, int64_t nameLen,
+lite::Value cluster_connect(const char *name, int64_t nameLen,
                             const char *addr, int64_t addrLen,
                             const char *secret, int64_t secretLen) {
     std::string n(name, nameLen);
@@ -34,22 +34,22 @@ PyValue py_cluster_connect(const char *name, int64_t nameLen,
     json << "\"status\":\"" << (ok ? "connected" : "failed") << "\"";
     json << "}";
     std::string result = json.str();
-    return py_str_new(result.c_str(), result.size());
+    return str_new(result.c_str(), result.size());
 }
 
 // cluster.disconnect(name) → 断开集群连接
-PyValue py_cluster_disconnect(const char *name, int64_t nameLen) {
+lite::Value cluster_disconnect(const char *name, int64_t nameLen) {
     std::string n(name, nameLen);
     bool ok = ClusterManager::instance().disconnect(n);
 
     std::string result = ok
         ? "{\"status\":\"disconnected\",\"cluster\":\"" + n + "\"}"
         : "{\"error\":\"not found\",\"cluster\":\"" + n + "\"}";
-    return py_str_new(result.c_str(), result.size());
+    return str_new(result.c_str(), result.size());
 }
 
 // cluster.list() → 列出所有已连接集群
-PyValue py_cluster_list() {
+lite::Value cluster_list() {
     auto clusters = ClusterManager::instance().list_clusters();
     std::ostringstream json;
     json << "[";
@@ -59,11 +59,11 @@ PyValue py_cluster_list() {
     }
     json << "]";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // cluster.is_connected(name) → 检查是否已连接
-int64_t py_cluster_is_connected(const char *name, int64_t nameLen) {
+int64_t cluster_is_connected(const char *name, int64_t nameLen) {
     std::string n(name, nameLen);
     return ClusterManager::instance().is_connected(n) ? 1 : 0;
 }
@@ -73,7 +73,7 @@ int64_t py_cluster_is_connected(const char *name, int64_t nameLen) {
 // ============================================================================
 
 // cluster.status(name) → 获取集群状态 JSON
-PyValue py_cluster_status(const char *name, int64_t nameLen) {
+lite::Value cluster_status(const char *name, int64_t nameLen) {
     std::string n(name, nameLen);
     auto st = ClusterManager::instance().get_status(n);
 
@@ -101,11 +101,11 @@ PyValue py_cluster_status(const char *name, int64_t nameLen) {
     }
     json << "]}";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // cluster.nodes(name) → 获取集群节点列表 JSON
-PyValue py_cluster_nodes(const char *name, int64_t nameLen) {
+lite::Value cluster_nodes(const char *name, int64_t nameLen) {
     std::string n(name, nameLen);
     auto nodes = ClusterManager::instance().get_nodes(n);
 
@@ -122,11 +122,11 @@ PyValue py_cluster_nodes(const char *name, int64_t nameLen) {
     }
     json << "]";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // cluster.health(name) → 健康检查
-int64_t py_cluster_health(const char *name, int64_t nameLen) {
+int64_t cluster_health(const char *name, int64_t nameLen) {
     std::string n(name, nameLen);
     return ClusterManager::instance().health_check(n) ? 1 : 0;
 }
@@ -136,7 +136,7 @@ int64_t py_cluster_health(const char *name, int64_t nameLen) {
 // ============================================================================
 
 // cluster.exec(name, cmd_type, payload) → 向集群发送命令
-PyValue py_cluster_exec(const char *name, int64_t nameLen,
+lite::Value cluster_exec(const char *name, int64_t nameLen,
                          const char *cmd_type, int64_t typeLen,
                          const char *payload, int64_t payloadLen) {
     std::string n(name, nameLen);
@@ -145,7 +145,7 @@ PyValue py_cluster_exec(const char *name, int64_t nameLen,
 
     int64_t t0_ = traceNowMs();
     auto result = ClusterManager::instance().exec(n, t, p);
-    if (py_trace_enabled()) { std::string d_ = n + "/" + t; py_trace_op("cluster", "exec", d_.c_str(), result.success ? 1 : 0, traceNowMs() - t0_); }
+    if (trace_enabled()) { std::string d_ = n + "/" + t; trace_op("cluster", "exec", d_.c_str(), result.success ? 1 : 0, traceNowMs() - t0_); }
 
     std::ostringstream json;
     json << "{";
@@ -158,11 +158,11 @@ PyValue py_cluster_exec(const char *name, int64_t nameLen,
     json << "\"body\":" << (result.body.empty() ? "null" : result.body);
     json << "}";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // cluster.query(name, path) → 向集群发送 GET 请求
-PyValue py_cluster_query(const char *name, int64_t nameLen,
+lite::Value cluster_query(const char *name, int64_t nameLen,
                           const char *path, int64_t pathLen) {
     std::string n(name, nameLen);
     std::string p(path, pathLen);
@@ -180,7 +180,7 @@ PyValue py_cluster_query(const char *name, int64_t nameLen,
     json << "\"body\":" << (result.body.empty() ? "null" : result.body);
     json << "}";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // ============================================================================
@@ -188,7 +188,7 @@ PyValue py_cluster_query(const char *name, int64_t nameLen,
 // ============================================================================
 
 // cluster.broadcast(cmd_type, payload) → 向所有集群广播命令
-PyValue py_cluster_broadcast(const char *cmd_type, int64_t typeLen,
+lite::Value cluster_broadcast(const char *cmd_type, int64_t typeLen,
                               const char *payload, int64_t payloadLen) {
     std::string t(cmd_type, typeLen);
     std::string p(payload, payloadLen);
@@ -211,11 +211,11 @@ PyValue py_cluster_broadcast(const char *cmd_type, int64_t typeLen,
     }
     json << "}";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 // cluster.health_all() → 所有集群健康检查
-PyValue py_cluster_health_all() {
+lite::Value cluster_health_all() {
     auto results = ClusterManager::instance().health_check_all();
 
     std::ostringstream json;
@@ -228,7 +228,7 @@ PyValue py_cluster_health_all() {
     }
     json << "}";
     std::string s = json.str();
-    return py_str_new(s.c_str(), s.size());
+    return str_new(s.c_str(), s.size());
 }
 
 }  // extern "C"

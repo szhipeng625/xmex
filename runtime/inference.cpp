@@ -117,23 +117,23 @@ static struct {
 // 加载 safetensors 模型权重和配置。
 //
 // 返回模型信息摘要。
-extern "C" PyValue py_inference_load_model(const PyValue *modelPath,
-                                            const PyValue *configPath) {
-  if (modelPath->tag != PY_STR || configPath->tag != PY_STR) {
-    py_runtime_error("inference_load_model() 需要两个字符串参数");
+extern "C" lite::Value inference_load_model(const lite::Value *modelPath,
+                                            const lite::Value *configPath) {
+  if (modelPath->tag != lite::kStr || configPath->tag != lite::kStr) {
+    runtime_error("inference_load_model() 需要两个字符串参数");
   }
 
-  const char *mp = py_str_data(modelPath);
-  const char *cp = py_str_data(configPath);
+  const char *mp = str_data(modelPath);
+  const char *cp = str_data(configPath);
 
   // 读取配置文件
   FILE *cf = fopen(cp, "r");
-  if (!cf) py_runtime_error("无法打开配置文件");
+  if (!cf) runtime_error("无法打开配置文件");
   fseek(cf, 0, SEEK_END);
   long cSize = ftell(cf);
   fseek(cf, 0, SEEK_SET);
   char *configJson = static_cast<char *>(malloc(static_cast<size_t>(cSize) + 1));
-  if (!configJson) { fclose(cf); py_runtime_error("内存不足"); }
+  if (!configJson) { fclose(cf); runtime_error("内存不足"); }
   fread(configJson, 1, static_cast<size_t>(cSize), cf);
   configJson[cSize] = '\0';
   fclose(cf);
@@ -151,19 +151,19 @@ extern "C" PyValue py_inference_load_model(const PyValue *modelPath,
 
   // 读取 safetensors 文件
   FILE *mf = fopen(mp, "r");
-  if (!mf) py_runtime_error("无法打开模型文件");
+  if (!mf) runtime_error("无法打开模型文件");
 
   // 读取 8 字节头长度
   uint8_t headerLenBuf[8];
   if (fread(headerLenBuf, 1, 8, mf) != 8) {
     fclose(mf);
-    py_runtime_error("无效的 safetensors 文件");
+    runtime_error("无效的 safetensors 文件");
   }
   uint64_t headerLen = readU64LE(headerLenBuf);
 
   // 读取 JSON 头
   char *headerJson = static_cast<char *>(malloc(static_cast<size_t>(headerLen) + 1));
-  if (!headerJson) { fclose(mf); py_runtime_error("内存不足"); }
+  if (!headerJson) { fclose(mf); runtime_error("内存不足"); }
   fread(headerJson, 1, static_cast<size_t>(headerLen), mf);
   headerJson[headerLen] = '\0';
 
@@ -175,7 +175,7 @@ extern "C" PyValue py_inference_load_model(const PyValue *modelPath,
 
   // 读取权重数据
   g_infer.weightData = static_cast<uint8_t *>(malloc(g_infer.weightDataSize));
-  if (!g_infer.weightData) { free(headerJson); fclose(mf); py_runtime_error("内存不足"); }
+  if (!g_infer.weightData) { free(headerJson); fclose(mf); runtime_error("内存不足"); }
   fseek(mf, dataOffset, SEEK_SET);
   fread(g_infer.weightData, 1, g_infer.weightDataSize, mf);
   fclose(mf);
@@ -194,7 +194,7 @@ extern "C" PyValue py_inference_load_model(const PyValue *modelPath,
     g_infer.kCache[i] = static_cast<float *>(malloc(cacheSize));
     g_infer.vCache[i] = static_cast<float *>(malloc(cacheSize));
     if (!g_infer.kCache[i] || !g_infer.vCache[i]) {
-      py_runtime_error("KV Cache 内存分配失败");
+      runtime_error("KV Cache 内存分配失败");
     }
   }
 
@@ -234,7 +234,7 @@ extern "C" PyValue py_inference_load_model(const PyValue *modelPath,
     static_cast<double>(g_infer.numLayers * g_infer.maxSeqLen *
                         g_infer.headDim * g_infer.numKVHeads * 2 * 4) / (1024.0 * 1024.0));
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // ===========================================================================
@@ -253,19 +253,19 @@ extern "C" PyValue py_inference_load_model(const PyValue *modelPath,
 //   5. 反分词输出文本
 //
 // 当前版本返回性能估算和架构说明。
-extern "C" PyValue py_inference_generate(const PyValue *prompt,
-                                          const PyValue *maxTokens,
-                                          const PyValue *temperature,
-                                          const PyValue *topP,
-                                          const PyValue *topK) {
+extern "C" lite::Value inference_generate(const lite::Value *prompt,
+                                          const lite::Value *maxTokens,
+                                          const lite::Value *temperature,
+                                          const lite::Value *topP,
+                                          const lite::Value *topK) {
   if (!g_infer.loaded) {
-    py_runtime_error("模型未加载，请先调用 inference_load_model()");
+    runtime_error("模型未加载，请先调用 inference_load_model()");
   }
 
-  int64_t maxTok = (maxTokens->tag == PY_INT) ? py_as_int(*maxTokens) : 256;
-  double temp = (temperature->tag == PY_FLOAT) ? py_as_float(*temperature) : 0.7;
-  double tp = (topP->tag == PY_FLOAT) ? py_as_float(*topP) : 0.9;
-  int64_t tk = (topK->tag == PY_INT) ? py_as_int(*topK) : 50;
+  int64_t maxTok = (maxTokens->tag == lite::kInt) ? as_int(*maxTokens) : 256;
+  double temp = (temperature->tag == lite::kFloat) ? as_float(*temperature) : 0.7;
+  double tp = (topP->tag == lite::kFloat) ? as_float(*topP) : 0.9;
+  int64_t tk = (topK->tag == lite::kInt) ? as_int(*topK) : 50;
 
   // 计算推理性能估算
   double flopsPerLayer = 2.0 * (
@@ -306,7 +306,7 @@ extern "C" PyValue py_inference_generate(const PyValue *prompt,
     totalFlops / 1e9, estimatedTimeMs, tokensPerSec,
     efficiency * 100);
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // ===========================================================================
@@ -315,9 +315,9 @@ extern "C" PyValue py_inference_generate(const PyValue *prompt,
 
 // inference_kv_cache_stats() -> str
 // 返回 KV Cache 使用统计。
-extern "C" PyValue py_inference_kv_cache_stats() {
+extern "C" lite::Value inference_kv_cache_stats() {
   if (!g_infer.loaded) {
-    py_runtime_error("模型未加载");
+    runtime_error("模型未加载");
   }
 
   int kvDim = g_infer.headDim * g_infer.numKVHeads;
@@ -342,7 +342,7 @@ extern "C" PyValue py_inference_kv_cache_stats() {
     usedBytes / (1024.0 * 1024.0),
     g_infer.maxSeqLen > 0 ? (static_cast<double>(g_infer.currentSeqLen) / g_infer.maxSeqLen * 100.0) : 0.0);
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // ===========================================================================
@@ -356,7 +356,7 @@ extern "C" PyValue py_inference_kv_cache_stats() {
 //   1. 分块计算 Softmax（online softmax）
 //   2. 避免将完整的 Attention 矩阵写回 HBM
 //   3. 在 SRAM 中完成 QK^T + Softmax + PV 的全流程
-extern "C" PyValue py_inference_flash_attention_kernel() {
+extern "C" lite::Value inference_flash_attention_kernel() {
   const char *kernel = R"(
 // FlashAttention 融合内核 for PyLite
 // 在共享内存中完成 QK^T + Softmax + PV，避免中间矩阵写回全局内存
@@ -470,7 +470,7 @@ extern "C" __global__ void flash_attention_fwd(
 }
 )";
 
-  return py_str_new(kernel, static_cast<int64_t>(strlen(kernel)));
+  return str_new(kernel, static_cast<int64_t>(strlen(kernel)));
 }
 
 // ===========================================================================
@@ -479,11 +479,11 @@ extern "C" __global__ void flash_attention_fwd(
 
 // inference_multi_gpu_info() -> str
 // 查询多 GPU 信息和张量并行配置建议。
-extern "C" PyValue py_inference_multi_gpu_info() {
+extern "C" lite::Value inference_multi_gpu_info() {
   // 通过 nvidia-smi 查询 GPU 数量
   FILE *fp = popen("nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>&1", "r");
   if (!fp) {
-    return py_str_new("{\"gpu_count\": 1, \"note\": \"单 GPU 模式\"}", 30);
+    return str_new("{\"gpu_count\": 1, \"note\": \"单 GPU 模式\"}", 30);
   }
 
   char line[512];
@@ -522,7 +522,7 @@ extern "C" PyValue py_inference_multi_gpu_info() {
     "}",
     gpuCount, gpuInfo, tpAdvice);
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // ===========================================================================
@@ -531,9 +531,9 @@ extern "C" PyValue py_inference_multi_gpu_info() {
 
 // inference_profile() -> str
 // 返回推理性能分解（延迟拆分为各组件）。
-extern "C" PyValue py_inference_profile() {
+extern "C" lite::Value inference_profile() {
   if (!g_infer.loaded) {
-    py_runtime_error("模型未加载");
+    runtime_error("模型未加载");
   }
 
   // 估算各组件延迟占比
@@ -568,7 +568,7 @@ extern "C" PyValue py_inference_profile() {
     qkvPct,
     (qkvPct + ffnPct) * 0.4);  // 融合可节省约 40% 的 QKV+FFN 时间
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // ===========================================================================
@@ -577,7 +577,7 @@ extern "C" PyValue py_inference_profile() {
 
 // inference_unload() -> None
 // 卸载模型，释放所有资源。
-extern "C" void py_inference_unload() {
+extern "C" void inference_unload() {
   if (g_infer.weightData) {
     free(g_infer.weightData);
     g_infer.weightData = nullptr;

@@ -26,12 +26,12 @@ void check(bool cond, const std::string &what) {
   if (!cond) ++g_failures;
 }
 
-std::string rep(PyValue v) {
-  PyValue s = py_repr(&v);
-  return std::string(py_str_data(&s), static_cast<size_t>(py_str_size(&s)));
+std::string rep(lite::Value v) {
+  lite::Value s = repr(&v);
+  return std::string(str_data(&s), static_cast<size_t>(str_size(&s)));
 }
 
-void checkRep(PyValue v, const std::string &want, const std::string &what) {
+void checkRep(lite::Value v, const std::string &want, const std::string &what) {
   const std::string got = rep(v);
   if (got == want) {
     std::printf("  [ok]   %s → %s\n", what.c_str(), got.c_str());
@@ -42,30 +42,30 @@ void checkRep(PyValue v, const std::string &want, const std::string &what) {
   }
 }
 
-PyValue str(const char *s) {
-  return py_str_new(s, static_cast<int64_t>(std::char_traits<char>::length(s)));
+lite::Value str(const char *s) {
+  return str_new(s, static_cast<int64_t>(std::char_traits<char>::length(s)));
 }
 
-PyValue list(std::initializer_list<PyValue> xs) {
-  std::vector<PyValue> v(xs);
-  return py_list_new(v.data(), static_cast<int64_t>(v.size()));
+lite::Value list(std::initializer_list<lite::Value> xs) {
+  std::vector<lite::Value> v(xs);
+  return list_new(v.data(), static_cast<int64_t>(v.size()));
 }
 
 // 消耗内存的垃圾:函数一返回,它的栈帧就离开扫描区间了
 __attribute__((noinline)) void makeGarbage(int count, int size) {
   std::vector<char> blob(static_cast<size_t>(size), 'x');
   for (int i = 0; i < count; ++i) {
-    PyValue s = py_str_new(blob.data(), size);
+    lite::Value s = str_new(blob.data(), size);
     (void)s;
   }
 }
 
 // 造一个环:x 引用 y,y 引用 x。引用计数会在这里泄漏,标记-清除不会。
 __attribute__((noinline)) void makeCycle() {
-  PyValue x = py_list_new(nullptr, 0);
-  PyValue y = py_list_new(nullptr, 0);
-  py_list_append(&x, &y);
-  py_list_append(&y, &x);
+  lite::Value x = list_new(nullptr, 0);
+  lite::Value y = list_new(nullptr, 0);
+  list_append(&x, &y);
+  list_append(&y, &x);
 }
 
 // 反复造短命对象,中途**不做任何显式回收** —— 验的是阈值自动触发。
@@ -73,20 +73,20 @@ __attribute__((noinline)) void makeCycle() {
 __attribute__((noinline)) void churn(int rounds, int size) {
   std::vector<char> blob(static_cast<size_t>(size), 'y');
   for (int i = 0; i < rounds; ++i) {
-    PyValue s = py_str_new(blob.data(), size);
-    PyValue l = py_list_new(nullptr, 0);
-    py_list_append(&l, &s);
+    lite::Value s = str_new(blob.data(), size);
+    lite::Value l = list_new(nullptr, 0);
+    list_append(&l, &s);
     (void)l;
   }
 }
 
 // 深一层:列表套列表
-__attribute__((noinline)) PyValue makeNested() {
-  PyValue inner = list({str("aaaa"), str("bbbb")});
-  PyValue tail = str("cccc");
-  PyValue outer = py_list_new(nullptr, 0);
-  py_list_append(&outer, &inner);
-  py_list_append(&outer, &tail);
+__attribute__((noinline)) lite::Value makeNested() {
+  lite::Value inner = list({str("aaaa"), str("bbbb")});
+  lite::Value tail = str("cccc");
+  lite::Value outer = list_new(nullptr, 0);
+  list_append(&outer, &inner);
+  list_append(&outer, &tail);
   return outer;
 }
 
@@ -97,8 +97,8 @@ int main() {
 
   std::printf("=== GC 测试 ===\n\n");
 
-  PyGcStats mode;
-  py_gc_stats(&mode);
+  lite::GcStats mode;
+  gc_stats(&mode);
   // 干跑模式只下毒、不归还内存,所以"回收了多少字节""存活块数下降"这两类
   // 断言在它下面不成立 —— 它要验的是另一件事:内容有没有被毒坏。
   const bool reclaims = (mode.dry_run == 0) && (mode.disabled == 0);
@@ -111,8 +111,8 @@ int main() {
   // ---------------------------------------------------------- 守恒律
   std::printf("-- 守恒律(内部自洽,恒成立)--\n");
   {
-    PyGcStats st;
-    py_gc_stats(&st);
+    lite::GcStats st;
+    gc_stats(&st);
     check(st.live_bytes + st.freed_bytes_total == st.alloc_bytes_total,
           "live + freed == alloc");
     std::printf("      分配 %lld / 回收 %lld / 存活 %lld 字节,存活 %lld 块\n",
@@ -126,13 +126,13 @@ int main() {
   std::printf("\n-- 真的回收了 --\n");
   {
     const int kCount = 64, kSize = 1 << 20;   // 64 × 1MB
-    PyGcStats before, after;
-    py_gc_stats(&before);
+    lite::GcStats before, after;
+    gc_stats(&before);
 
     makeGarbage(kCount, kSize);   // 函数返回后,这些字符串没有任何引用
-    py_gc_collect();
+    gc_collect();
 
-    py_gc_stats(&after);
+    gc_stats(&after);
     const int64_t freedDelta = after.freed_bytes_total - before.freed_bytes_total;
     const int64_t made = static_cast<int64_t>(kCount) * kSize;
 
@@ -152,51 +152,51 @@ int main() {
   std::printf("\n-- 不误回收:只留一条根,内容必须完好 --\n");
   {
     // 列表:items 数组若被标成 SCAN_NONE,元素会被回收,这里就读到 0xDD
-    PyValue xs = list({str("aaaa"), str("bbbb")});
-    py_gc_collect();
+    lite::Value xs = list({str("aaaa"), str("bbbb")});
+    gc_collect();
     checkRep(xs, "['aaaa', 'bbbb']", "列表:元素数组被正确扫描");
 
     // 元组:单元格从偏移 8 开始,标错偏移整条链就错位
-    PyValue tupElems[2] = {str("aaaa"), str("bbbb")};
-    PyValue tup = py_tuple_new(tupElems, 2);
-    py_gc_collect();
+    lite::Value tupElems[2] = {str("aaaa"), str("bbbb")};
+    lite::Value tup = tuple_new(tupElems, 2);
+    gc_collect();
     checkRep(tup, "('aaaa', 'bbbb')", "元组:单元格偏移 8");
 
     // 字典:keys 与 vals 是两个独立的块
-    PyValue keys[1] = {str("kk")};
-    PyValue vals[1] = {str("vvvv")};
-    PyValue d = py_dict_new(keys, vals, 1);
-    py_gc_collect();
+    lite::Value keys[1] = {str("kk")};
+    lite::Value vals[1] = {str("vvvv")};
+    lite::Value d = dict_new(keys, vals, 1);
+    gc_collect();
     checkRep(d, "{'kk': 'vvvv'}", "字典:keys/vals 两个数组都被扫描");
 
     // 切片:结果列表的 elems 数组
-    PyValue lo = py_int(0), hi = py_int(2), noStep = py_none();
-    PyValue sliced = py_slice(&xs, &lo, &hi, &noStep);
-    py_gc_collect();
+    lite::Value lo = int_(0), hi = int_(2), noStep = none_();
+    lite::Value sliced = slice(&xs, &lo, &hi, &noStep);
+    gc_collect();
     checkRep(sliced, "['aaaa', 'bbbb']", "切片:结果数组被正确扫描");
 
     // 列表套列表:层与层之间靠保守扫描自动传递
-    PyValue nested = makeNested();
-    py_gc_collect();
+    lite::Value nested = makeNested();
+    gc_collect();
     checkRep(nested, "[['aaaa', 'bbbb'], 'cccc']", "嵌套列表:逐层可达");
   }
 
   // ------------------------------------------------------------ 环
   std::printf("\n-- 环(引用计数会在这里泄漏)--\n");
   {
-    PyGcStats before, after;
+    lite::GcStats before, after;
     // 先造一轮,让堆长起来,避免把"首次分配"的噪声算进来
     makeCycle();
-    py_gc_collect();
-    py_gc_stats(&before);
+    gc_collect();
+    gc_stats(&before);
 
     for (int i = 0; i < 50; ++i) makeCycle();
-    py_gc_stats(&after);
+    gc_stats(&after);
     check(after.live_blocks > before.live_blocks, "50 个环确实占用着堆");
 
-    py_gc_collect();
-    PyGcStats swept;
-    py_gc_stats(&swept);
+    gc_collect();
+    lite::GcStats swept;
+    gc_stats(&swept);
     std::printf("      回收前 %lld 块 → 回收后 %lld 块\n",
                 static_cast<long long>(after.live_blocks),
                 static_cast<long long>(swept.live_blocks));
@@ -210,13 +210,13 @@ int main() {
   // ------------------------------------------------ 自动触发(阈值)
   std::printf("\n-- 自动回收:阈值触发,存活量有界 --\n");
   {
-    PyGcStats before, after;
-    py_gc_stats(&before);
+    lite::GcStats before, after;
+    gc_stats(&before);
 
     const int kRounds = 400, kSize = 256 * 1024;   // 约 100MB 累计分配
     churn(kRounds, kSize);                          // 全程不显式回收
 
-    py_gc_stats(&after);
+    gc_stats(&after);
     const int64_t made = after.alloc_bytes_total - before.alloc_bytes_total;
     std::printf("      本轮累计分配约 %lld MB,回收后存活 %lld MB\n",
                 static_cast<long long>(made >> 20),
@@ -235,11 +235,11 @@ int main() {
   // ------------------------------------------------- 手动入口与幂等
   std::printf("\n-- 手动回收 --\n");
   {
-    PyGcStats a, b;
-    py_gc_collect();
-    py_gc_stats(&a);
-    py_gc_collect();          // 连着收两次不应出错
-    py_gc_stats(&b);
+    lite::GcStats a, b;
+    gc_collect();
+    gc_stats(&a);
+    gc_collect();          // 连着收两次不应出错
+    gc_stats(&b);
     check(a.collections + 1 == b.collections, "每次调用计数 +1");
     if (reclaims) {
       check(b.live_bytes <= a.live_bytes, "重复回收不会把存活量收上去");

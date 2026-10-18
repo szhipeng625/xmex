@@ -22,8 +22,8 @@
 #include <atomic>
 #include <sstream>
 
-extern "C" PyValue py_raft_send(const char*, int64_t, const char*, int64_t);
-extern "C" PyValue py_kv_build(const char*, int64_t, const char*, int64_t, const char*, int64_t, const char*, int64_t, const char*, int64_t);
+extern "C" lite::Value raft_send(const char*, int64_t, const char*, int64_t);
+extern "C" lite::Value kv_build(const char*, int64_t, const char*, int64_t, const char*, int64_t, const char*, int64_t, const char*, int64_t);
 
 // ---- TLS 支持(跨机通信加密,2026-10 增补) ----
 #include <openssl/ssl.h>
@@ -280,20 +280,20 @@ void handleRequest(SSL *ssl, int clientFd) {
       std::string nAddr   = extractJsonString(jsonBody, "addr");
       std::string nDir    = extractJsonString(jsonBody, "work_dir");
       if (nDir.empty()) nDir = "/tmp";
-      PyValue br = py_kv_build(nNodeId.c_str(), nNodeId.size(),
+      lite::Value br = kv_build(nNodeId.c_str(), nNodeId.size(),
                                nBinary.c_str(), nBinary.size(),
                                "[]", 2,
                                nDir.c_str(), nDir.size(),
                                nAddr.c_str(), nAddr.size());
-      std::string bs = (br.tag == PY_STR)
-          ? std::string(py_str_data(&br), py_str_size(&br)) : "{}";
+      std::string bs = (br.tag == lite::kStr)
+          ? std::string(str_data(&br), str_size(&br)) : "{}";
       std::string response = buildHttpResponse(200, bs);
       tlsSend(ssl, response.c_str(), response.size());
       close(clientFd);
       return;
     }
     std::string msg = "{\"type\":\"" + cmdType + "\",\"payload\":" + payload + "}";
-    py_raft_send(nid.c_str(), nid.size(), msg.c_str(), msg.size());
+    raft_send(nid.c_str(), nid.size(), msg.c_str(), msg.size());
     std::string body = "{\"received\":true,\"node\":\"" + nid + "\"}";
     std::string response = buildHttpResponse(200, body);
     tlsSend(ssl, response.c_str(), response.size());
@@ -363,34 +363,34 @@ void serverLoop(int port) {
 // ===========================================================================
 
 // server_config(secret, node_id) —— 配置集群通信密钥与本节点ID
-extern "C" PyValue py_server_config(const PyValue *secret, const PyValue *node_id) {
-  if (secret && secret->tag == PY_STR) {
-    g_clusterSecret.assign(py_str_data(secret), py_str_size(secret));
+extern "C" lite::Value server_config(const lite::Value *secret, const lite::Value *node_id) {
+  if (secret && secret->tag == lite::kStr) {
+    g_clusterSecret.assign(str_data(secret), str_size(secret));
   }
-  if (node_id && node_id->tag == PY_STR) {
-    g_nodeId.assign(py_str_data(node_id), py_str_size(node_id));
+  if (node_id && node_id->tag == lite::kStr) {
+    g_nodeId.assign(str_data(node_id), str_size(node_id));
   }
-  return py_str_new("{\"configured\":true}", 18);
+  return str_new("{\"configured\":true}", 18);
 }
 
 // server_tls(cert_path, key_path) —— 开启 TLS 加密监听(跨机通信加密)
-extern "C" PyValue py_server_tls(const PyValue *cert, const PyValue *key) {
+extern "C" lite::Value server_tls(const lite::Value *cert, const lite::Value *key) {
   std::string cp, kp;
-  if (cert && cert->tag == PY_STR) cp.assign(py_str_data(cert), py_str_size(cert));
-  if (key && key->tag == PY_STR) kp.assign(py_str_data(key), py_str_size(key));
+  if (cert && cert->tag == lite::kStr) cp.assign(str_data(cert), str_size(cert));
+  if (key && key->tag == lite::kStr) kp.assign(str_data(key), str_size(key));
   bool ok = tlsInit(cp, kp);
   std::string r = ok ? "{\"tls\":\"enabled\"}" : "{\"tls\":\"failed\"}";
-  return py_str_new(r.c_str(), r.size());
+  return str_new(r.c_str(), r.size());
 }
 
 // server_start(port: int) -> str
 // 启动 HTTP 推理服务。
-extern "C" PyValue py_server_start(const PyValue *port) {
+extern "C" lite::Value server_start(const lite::Value *port) {
   if (g_serverRunning) {
-    py_runtime_error("服务器已在运行中");
+    runtime_error("服务器已在运行中");
   }
 
-  int p = (port->tag == PY_INT) ? static_cast<int>(py_as_int(*port)) : 8080;
+  int p = (port->tag == lite::kInt) ? static_cast<int>(as_int(*port)) : 8080;
   g_serverPort = p;
   g_serverRunning = true;
 
@@ -411,22 +411,22 @@ extern "C" PyValue py_server_start(const PyValue *port) {
     "}",
     p, p, p, p);
 
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }
 
 // server_stop() -> None
 // 停止 HTTP 推理服务。
-extern "C" void py_server_stop() {
+extern "C" void server_stop() {
   g_serverRunning = false;
   // 线程会在下一次超时后自动退出
 }
 
 // server_status() -> str
 // 查询服务器状态。
-extern "C" PyValue py_server_status() {
+extern "C" lite::Value server_status() {
   char buf[256];
   snprintf(buf, sizeof(buf),
     "{\"running\":%s,\"port\":%d}",
     g_serverRunning ? "true" : "false", g_serverPort);
-  return py_str_new(buf, static_cast<int64_t>(strlen(buf)));
+  return str_new(buf, static_cast<int64_t>(strlen(buf)));
 }

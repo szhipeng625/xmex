@@ -273,14 +273,14 @@ int64_t nowMillis(std::chrono::steady_clock::time_point t) {
 // --- 对外接口 ---
 
 // 启动通信服务。port 为 0 表示用默认端口 18900。
-// 指定落盘文件路径(可选)。必须在 py_trace_start 之前调用。
-extern "C" void py_trace_set_dump(const char *path) {
+// 指定落盘文件路径(可选)。必须在 trace_start 之前调用。
+extern "C" void trace_set_dump(const char *path) {
   g_traceDumpPath = path;
 }
 
 // cuda / docker 操作事件。category 取 cuda 或 docker,op 为操作名,
 // detail 为对象描述,ok 为是否成功,elapsed 为耗时(毫秒)。
-extern "C" void py_trace_op(const char *category, const char *op,
+extern "C" void trace_op(const char *category, const char *op,
                             const char *detail, int ok, int64_t elapsed) {
   if (!g_traceEnabled || category == nullptr) return;
   std::string json = "{\"type\":\"op\",\"category\":" +
@@ -292,7 +292,7 @@ extern "C" void py_trace_op(const char *category, const char *op,
   pushEvent(json);
 }
 
-extern "C" void py_trace_start(int port) {
+extern "C" void trace_start(int port) {
   if (g_traceEnabled) return;
   if (port > 0) g_tracePort = port;
   if (g_traceDumpPath) {
@@ -315,7 +315,7 @@ extern "C" void py_trace_start(int port) {
 }
 
 // 停止通信服务。
-extern "C" void py_trace_stop() {
+extern "C" void trace_stop() {
   g_serverRunning = false;
   g_traceEnabled = false;
   if (g_traceDump) {
@@ -325,7 +325,7 @@ extern "C" void py_trace_stop() {
 }
 
 // 函数进入事件。返回一个帧标识,退出时用它关联。
-extern "C" int64_t py_trace_enter(const char *name, int64_t parentId) {
+extern "C" int64_t trace_enter(const char *name, int64_t parentId) {
   if (!g_traceEnabled || name == nullptr) return 0;
   traceLock();
   int64_t id = g_nextId++;
@@ -340,7 +340,7 @@ extern "C" int64_t py_trace_enter(const char *name, int64_t parentId) {
 }
 
 // 函数退出事件。ok 为 true 表示正常完成,false 表示失败。elapsed 是耗时(毫秒)。
-extern "C" void py_trace_exit(int64_t id, const char *name, int ok, int64_t elapsed) {
+extern "C" void trace_exit(int64_t id, const char *name, int ok, int64_t elapsed) {
   if (!g_traceEnabled || name == nullptr) return;
   char buf[512];
   std::snprintf(buf, sizeof(buf),
@@ -352,7 +352,7 @@ extern "C" void py_trace_exit(int64_t id, const char *name, int ok, int64_t elap
 
 // --- 供编译期插桩使用的便捷接口 ---
 // 进入:自动记录进入时刻与调用层级,返回帧标识(>0)。
-extern "C" int64_t py_trace_begin(const char *name) {
+extern "C" int64_t trace_begin(const char *name) {
   if (!g_traceEnabled || name == nullptr) return 0;
   traceLock();
   int64_t id = g_nextId++;
@@ -370,9 +370,9 @@ extern "C" int64_t py_trace_begin(const char *name) {
 }
 // 进入:附带形参名与实参值,显示名形如 combine(a=7, b=10)。
 // paramNames 是形参名数组,paramValues 是各实参值指针数组。
-extern "C" int64_t py_trace_begin_args(const char *name, int count,
+extern "C" int64_t trace_begin_args(const char *name, int count,
                                        const char *const *paramNames,
-                                       const PyValue *const *paramValues) {
+                                       const lite::Value *const *paramValues) {
   if (!g_traceEnabled || name == nullptr) return 0;
   traceLock();
   int64_t id = g_nextId++;
@@ -394,8 +394,8 @@ extern "C" int64_t py_trace_begin_args(const char *name, int count,
     display += "=";
     const char *text = "None";
     if (paramValues && paramValues[i] != nullptr) {
-      PyValue r = py_repr(paramValues[i]);
-      if (r.tag == PY_STR) text = py_str_data(&r);
+      lite::Value r = repr(paramValues[i]);
+      if (r.tag == lite::kStr) text = str_data(&r);
     }
     display += text;
   }
@@ -407,7 +407,7 @@ extern "C" int64_t py_trace_begin_args(const char *name, int count,
   return id;
 }
 // 退出:自动算耗时,并从调用栈上弹掉。id 无效时是安全的空操作。
-extern "C" void py_trace_end(int64_t id, const char *name, int ok) {
+extern "C" void trace_end(int64_t id, const char *name, int ok) {
   if (!g_traceEnabled || name == nullptr) return;
   traceLock();
   int64_t elapsed = 0;
@@ -425,7 +425,7 @@ extern "C" void py_trace_end(int64_t id, const char *name, int ok) {
   pushEvent(buf);
 }
 // 单变量上报:name 是变量名,value 是它的可读文本(由编译器先转成字符串)。
-extern "C" void py_trace_var(const char *name, const char *value) {
+extern "C" void trace_var(const char *name, const char *value) {
   if (!g_traceEnabled || name == nullptr) return;
   const std::string v = value ? value : "None";
   char buf[512];
@@ -435,7 +435,7 @@ extern "C" void py_trace_var(const char *name, const char *value) {
 }
 
 // 变量赋值事件。vars 是 JSON 格式的键值对,如 {"x":42,"y":"hello"}。
-extern "C" void py_trace_vars(const char *varsJson) {
+extern "C" void trace_vars(const char *varsJson) {
   if (!g_traceEnabled || varsJson == nullptr) return;
   char buf[1024];
   std::snprintf(buf, sizeof(buf), "{\"type\":\"vars\",\"vars\":%s}", varsJson);
@@ -443,7 +443,7 @@ extern "C" void py_trace_vars(const char *varsJson) {
 }
 
 // 错误事件。
-extern "C" void py_trace_error(const char *msg) {
+extern "C" void trace_error(const char *msg) {
   if (!g_traceEnabled || msg == nullptr) return;
   char buf[1024];
   std::snprintf(buf, sizeof(buf),
@@ -452,18 +452,18 @@ extern "C" void py_trace_error(const char *msg) {
 }
 
 // 是否已启用。
-extern "C" int32_t py_trace_enabled() {
+extern "C" int32_t trace_enabled() {
   return g_traceEnabled ? 1 : 0;
 }
 
 // 直接收『变量名 + 值指针』的上报接口。值的文本化在这里完成(用运行时的 repr),
 // 编译器侧不用关心字符串怎么取、怎么保证 NUL 结尾 —— 全部收敛到这一个入口。
-extern "C" void py_trace_var_value(const char *name, const PyValue *v) {
+extern "C" void trace_var_value(const char *name, const lite::Value *v) {
   if (!g_traceEnabled || name == nullptr) return;
   const char *text = "None";
   if (v != nullptr) {
-    PyValue r = py_repr(v);
-    if (r.tag == PY_STR) text = py_str_data(&r);
+    lite::Value r = repr(v);
+    if (r.tag == lite::kStr) text = str_data(&r);
   }
   // ⚠️ text 指向的字符串对象在这之后不能再触发分配:jsonStr / pushEvent 都不走
   // 堆对象分配,所以指针在本函数内始终有效。
