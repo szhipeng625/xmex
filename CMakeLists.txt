@@ -34,16 +34,16 @@ add_compile_options(${LLVM_DEFINITIONS_LIST})
 # Linux 上使用 SHARED(.so)，JIT 生成的代码通过 dlsym 解析运行时符号。
 # GCC/Clang 对 -shared 默认导出全部符号，无需额外标注。
 # ---------------------------------------------------------------------------
-# 内置分布式项目 adviskv（作为子项目接入构建）
+# 内置分布式项目 adviskv —— 已于 2026-10 移除
 # ---------------------------------------------------------------------------
-# 仅 Linux 构建接入:adviskv 是 Linux/vcpkg 项目,Windows 上子模块不可用,
-# 且没有任何 Xmex 源码引用它的符号。
-if(NOT WIN32)
-  set(VCPKG_INSTALLED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/adviskv/.adviskv_deps/vcpkg/installed" CACHE PATH "adviskv vcpkg installed dir")
-  list(PREPEND CMAKE_PREFIX_PATH "${VCPKG_INSTALLED_DIR}/x64-linux")
-  set(VCPKG_MANIFEST_INSTALL OFF CACHE BOOL "Disable vcpkg manifest install" FORCE)
-  add_subdirectory(third_party/adviskv)
-endif()
+# 移除前它是 Linux-only 的子项目(xmex_runtime 直接链接它的四个静态库),
+# 但核查发现 **Xmex 源码一处都没有 include 它的头** —— 那四个链接目标在
+# 链接期存在,代码期没有实际使用。所以移除它不会让任何功能退化成空壳。
+#
+# 代价与恢复方式见 docs/raft-removal.md:adviskv 里有真 Raft(带 PreVote /
+# AppendEntries / WAL / Snapshot),移除后本项目**不再具备共识能力**。
+# 需要分布式存储时,把它作为外部依赖接回来(不必做子模块,普通
+# find_package + 链接也可以)。
 
 # 核心运行时:跨平台,两个平台都编。
 set(XMEX_RUNTIME_SOURCES
@@ -133,9 +133,7 @@ else()
   pkg_check_modules(SECCOMP REQUIRED libseccomp)
   target_include_directories(xmex_runtime PRIVATE ${SECCOMP_INCLUDE_DIRS})
   find_package(OpenSSL REQUIRED)
-  # OpenSSL / seccomp 使用静态库内置，与 adviskv 内 gRPC 静态组保持一致，
-  # 避免同一符号同时从动态库和静态库加载两份副本。
-  target_link_libraries(xmex_runtime PRIVATE pthread dl /usr/lib/x86_64-linux-gnu/libseccomp.a /usr/lib/x86_64-linux-gnu/libssl.a /usr/lib/x86_64-linux-gnu/libcrypto.a adviskv_storage_lib adviskv_catalog_lib adviskv_topo_lib adviskv_sdk)
+  target_link_libraries(xmex_runtime PRIVATE pthread dl /usr/lib/x86_64-linux-gnu/libseccomp.a /usr/lib/x86_64-linux-gnu/libssl.a /usr/lib/x86_64-linux-gnu/libcrypto.a)
 endif()
 
 # ---------------------------------------------------------------------------

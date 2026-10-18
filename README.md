@@ -64,7 +64,7 @@ configure → 构建(要跑 xmexc.exe)→ ctest(要加载 libLLVM-22.dll)全程�
 `quantize` `concurrency` `object` `trace` `ffi` `ffi_api` `platform_proc`
 `distributed_adapter`。
 
-**仅 Linux**(依赖 POSIX socket / fork / seccomp / adviskv):`sandbox` `cgroup` `sysmon`
+**仅 Linux**(依赖 POSIX socket / fork / seccomp):`sandbox` `cgroup` `sysmon`
 `server` `engine` `cuda` `cluster` `kv_admin` `kv_queue` `plugin_api` `lsm_client` 等。
 
 ⚠️ **这意味着 `kv.add`(进程纳管)、`kv.reconcile_*`(调谐循环)、`kv.group_*`(副本组)
@@ -419,7 +419,6 @@ kv.group_status("shard-1")
 | `tests/ffi_test.cpp` | FFI 单元测试(测一个**真实**的动态库,不是桩) |
 | `tests/reconcile_test.cpp` | 调谐循环与副本组测试(注入模式,不 fork 真实进程) |
 | `xmex_web/` | 通用挂载协议:MySQL / OJ / Docker / MQ / MID / CloudJudge 六后端统一接口 |
-| `third_party/adviskv/` | 内置的分布式 KV 存储(C++17,含真 Raft) |
 
 运行时按关注点分文件,每个文件一个对象类型或一类操作:
 

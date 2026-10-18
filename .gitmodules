@@ -1,4 +1,0 @@
-[submodule "third_party/adviskv"]
-	path = third_party/adviskv
-	url = https://github.com/advisedy/adviskv.git
-	branch = main
