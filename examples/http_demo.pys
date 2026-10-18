@@ -1,6 +1,6 @@
 # http_demo.pys -- HTTP client demo / API test example
 #
-# Shows the http.* module used from PyLite.
+# Shows the http.* module used from Xmex.
 # The return value is a JSON string containing ok/status/elapsed_ms/body.
 #
 # NOTE: .pys files must not contain non-ASCII characters -- the lexer

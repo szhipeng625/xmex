@@ -1,6 +1,6 @@
 // ffi_api.cpp —— FFI 的语言层接口
 //
-// 暴露到 PyLite 的用法:
+// 暴露到 Xmex 的用法:
 //
 //   lib = kv.ffi("./xx.dll")        # 加载动态库,返回实例
 //   print(lib.symbols())            # 看有哪些函数
@@ -54,7 +54,7 @@ static std::string jesc(const std::string& s) {
     return out;
 }
 
-// 把一个 PyLite 值序列化成 JSON。
+// 把一个 Xmex 值序列化成 JSON。
 // 实参只支持标量(int/float/bool/str)与标量组成的列表 ——
 // 传 dict 或嵌套结构给 FFI 没有意义,拒绝掉比默默出错好。
 static bool value_to_json(const xmex::Value* v, std::string& out) {
@@ -347,7 +347,7 @@ xmex::Value ffi_call_v(const xmex::Value* inst, xmex::Value* args, int64_t nargs
     }
     std::string fn(str_data(&args[0]), str_size(&args[0]));
 
-    // 第二个参数是实参列表(PyLite list),序列化成 JSON 数组
+    // 第二个参数是实参列表(Xmex list),序列化成 JSON 数组
     std::string args_json = "[]";
     if (nargs >= 2 && args[1].tag == xmex::kList) {
         std::string tmp;

@@ -1,12 +1,12 @@
 // http_api.cpp —— HTTP 客户端的语言层接口
 //
-// 暴露到 PyLite:
+// 暴露到 Xmex:
 //   http.get(url, timeout_ms)          → 响应 JSON 字符串
 //   http.post(url, body, timeout_ms)   → 响应 JSON 字符串
 //   http.request(method, url, body, timeout_ms, token, headers)
 //   http.head(url, timeout_ms)         → 只取状态码与响应头
 //
-// 全部返回 JSON 字符串,理由与 kv.* 一致:PyLite 侧解析 JSON 字符串比解析
+// 全部返回 JSON 字符串,理由与 kv.* 一致:Xmex 侧解析 JSON 字符串比解析
 // 嵌套结构省事,而且和项目现有的返回值风格统一(没有 JSON 解析器可依赖)。
 //
 // 故意**不做**的事:不提供连接池、不提供异步、不做重定向跟随、不做

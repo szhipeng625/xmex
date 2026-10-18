@@ -182,7 +182,7 @@ cd build && ctest --output-on-failure
 | 测试 | 测什么 | 特点 |
 |---|---|---|
 | `ffi_test` | 动态库 FFI 的 C++ 层 | 测一个**真实**的动态库(`tests/ffi_test_dll.cpp`),不是桩 |
-| `ffi_demo` | FFI 端到端 | PyLite 脚本 → 编译 → 链接 → 加载 DLL → 调用 |
+| `ffi_demo` | FFI 端到端 | Xmex 脚本 → 编译 → 链接 → 加载 DLL → 调用 |
 | `ffi_isolated_demo` | 隔离模式 | 核心验证点:DLL 段错误后**宿主必须活着** |
 | `reconcile_test` | 调谐循环与副本组 | 用 `set_spawn_hook` 注入假 spawn,不 fork 真实进程,**Windows 上也能跑** |
 

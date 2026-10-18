@@ -261,7 +261,7 @@ observed 重新判成 ALIVE。而健康副本数是按 observed 统计的，于�
 
 调谐与副本组通过 `kv.*` 内置模块暴露（`irgen.cpp` 的 `builtinModulePrefix` 映射）：
 
-| PyLite 写法 | 作用 |
+| Xmex 写法 | 作用 |
 |---|---|
 | `kv.reconcile_start(1000)` | 启动后台调谐循环（毫秒间隔） |
 | `kv.reconcile_stop()` | 停止 |

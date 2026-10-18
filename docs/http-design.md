@@ -136,7 +136,7 @@ print(http.get("http://127.0.0.1:8080/ping"))   # 调谐重启后恢复 200
 连接失败/超时/URL 解析/JSON 转义。
 
 `examples/http_demo.pys` + `examples/http_demo_main.cpp` 是端到端用例：
-C++ 宿主 + 编译后的 `.o`，验证 `PyLite 源码 → 编译 → 链接 → 真实 HTTP` 整条链路。
+C++ 宿主 + 编译后的 `.o`，验证 `Xmex 源码 → 编译 → 链接 → 真实 HTTP` 整条链路。
 
 ### 测试抓到的三个 bug
 

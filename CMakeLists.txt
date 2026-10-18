@@ -268,7 +268,7 @@ else()
 endif()
 add_test(NAME http_test COMMAND http_test)
 
-# 语言层边界的验证:PyLite 脚本调 http.get 打真实服务。
+# 语言层边界的验证:Xmex 脚本调 http.get 打真实服务。
 # 这里必须链 xmex_runtime —— http_api.cpp 用的是运行时的 str_new/dict_*,
 # 缺了链接不过。端到端跑的是真链路:C++ 宿主 + 编译后的 .o + 真实 HTTP。
 add_executable(http_api_demo examples/http_demo_main.cpp)
@@ -313,9 +313,9 @@ target_include_directories(xmex_ffi_agent PRIVATE
 # (见 runtime/ffi_api.cpp 的 agent_path())。两个目标的输出目录都是
 # ${CMAKE_BINARY_DIR}/bin,所以天然满足。
 
-# FFI 的端到端演示:C++ 宿主 + PyLite 脚本实际加载动态库并调用。
+# FFI 的端到端演示:C++ 宿主 + Xmex 脚本实际加载动态库并调用。
 #
-# 这是唯一能验证「PyLite 源码 → 编译 → 链接 → 加载 DLL → 调用」整条链路的
+# 这是唯一能验证「Xmex 源码 → 编译 → 链接 → 加载 DLL → 调用」整条链路的
 # 用例。ffi_test 只测 C++ 层的 ffi.cpp,测不到 irgen 的映射与 ABI 约定。
 add_executable(ffi_demo examples/ffi_main.cpp)
 target_include_directories(ffi_demo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)

@@ -1,6 +1,6 @@
 // reconcile_test.cpp —— 调谐循环与副本组的独立验证
 //
-// 不依赖 LLVM/PyLite 运行时,只链 kv_admin.cpp。
+// 不依赖 LLVM/Xmex 运行时,只链 kv_admin.cpp。
 //
 // 关键设计:用 set_spawn_hook 注入假的 spawn —— 调谐的核心是
 // 「观测 → 判断 → 动作」这套逻辑,不必真的 fork 进程。这样测试

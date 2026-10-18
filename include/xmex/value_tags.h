@@ -2,7 +2,7 @@
 //
 // 从 value.h 里拆出来的原因:
 //   irgen 只需要 tag 常量(生成比较指令时用),不需要 Value 结构体本身。
-//   但如果 irgen 引入 value.h,`xmex::Value`(PyLite 的值类型)就会进入
+//   但如果 irgen 引入 value.h,`xmex::Value`(Xmex 的值类型)就会进入
 //   `namespace xmex` 的作用域 —— 而 irgen 内部大量使用裸 `Value` 指
 //   `llvm::Value`(LLVM 的 SSA 值)。两者同名,近邻查找规则让裸 `Value`
 //   解析到 `xmex::Value`,于是报:

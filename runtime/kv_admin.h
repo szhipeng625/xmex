@@ -231,7 +231,7 @@ public:
     // 声明一个副本组:即使一个成员挂了,调谐循环也会自动补足到期望副本数。
     // 这是"skip 之后自动补副本"的入口。
     //
-    // 用法(PyLite 侧示意):
+    // 用法(Xmex 侧示意):
     //   kv.group("user-shard-1", replicas=3, binary="...", addr_prefix="127.0.0.1:9200")
     //   kv.group_add("user-shard-1", "node-a")   # 加一个现有节点作为成员
     bool group_create(const std::string& group_id,

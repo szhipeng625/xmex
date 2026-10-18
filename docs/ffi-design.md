@@ -3,7 +3,7 @@
 `kv.ffi(path)` 在**本进程内**加载一个 `.dll` / `.so`，按动态库自己声明的签名
 调用其中的函数。
 
-本文写清楚：为什么这么设计、动态库侧要写什么、PyLite 侧怎么用、
+本文写清楚：为什么这么设计、动态库侧要写什么、Xmex 侧怎么用、
 以及哪些还没做（回调、远程）。
 
 ---
@@ -53,7 +53,7 @@ after crash: {"ok":false,"error":"worker already dead (exit code 139)"}
 ### 2.1 隔离模式的结构
 
 ```
-宿主(PyLite)                          子进程(xmex_ffi_agent)
+宿主(Xmex)                          子进程(xmex_ffi_agent)
    │ 写请求(管道)                          │
    ├────────── {"op":"call",...} ────────▶ │ 加载 DLL
    │                                         │ 调函数
@@ -144,7 +144,7 @@ FFI 问「函数调用成没成」（同步返回值），调谐问「进程还�
 
 ## 三、为什么要求动态库导出「描述符」
 
-PyLite 侧的调用是 `lib.init(1, "abc")` —— **参数个数与类型在编译期不知道**。
+Xmex 侧的调用是 `lib.init(1, "abc")` —— **参数个数与类型在编译期不知道**。
 `init` 是运行时的名字，参数是运行时的值。
 
 C 的函数没有自描述能力，`dlsym` 拿到的只是一个裸指针。所以动态库必须
@@ -213,7 +213,7 @@ per-call 的内存，或者约定由宿主提供输出缓冲。
 
 ---
 
-## 五、PyLite 侧用法
+## 五、Xmex 侧用法
 
 ```python
 lib = kv.ffi("./xx.dll")          # 加载;失败返回 {"ok":false,"error":...}
@@ -237,7 +237,7 @@ print(kv.ffi_list())
 # '[{"id":"ffi-1","path":"./xx.dll","functions":4,"has_descriptor":true}]'
 ```
 
-**返回值一律是 JSON 字符串**，不是结构化值 —— 因为 PyLite 侧解析
+**返回值一律是 JSON 字符串**，不是结构化值 —— 因为 Xmex 侧解析
 JSON 字符串比解析嵌套结构省事得多（`kv.status` 等接口也是这个约定）。
 
 `lib.call` 的实参只支持标量（int/float/bool/str）和标量组成的列表。
@@ -287,7 +287,7 @@ Windows 上把这个功能阉掉。
 
 ### 7.1 反向回调（`lib.on("init", handler)`）
 
-把 PyLite 函数的地址交给动态库，让它回调。PyLite 的函数符号是
+把 Xmex 函数的地址交给动态库，让它回调。Xmex 的函数符号是
 `xmex_<模块>_<函数>`，可以 `dlsym` 反查自身，所以技术上可行。
 
 但有两个必须先解决的问题：
@@ -306,7 +306,7 @@ Windows 上把这个功能阉掉。
 形态必然是：
 
 ```
-PyLite 侧                    远端
+Xmex 侧                    远端
   ↓ HTTP/TCP
   ↓ 客户端桩
   ↓ ──────────────→  agent 进程 → dlopen(remote.so) → 调用
@@ -336,8 +336,8 @@ PyLite 侧                    远端
 调用、错误路径（函数返回非 0、符号不存在）、全局列表、卸载。
 
 `examples/ffi_demo.pys` + `examples/ffi_main.cpp` 是**端到端**用例：
-C++ 宿主 + PyLite 脚本，脚本里 `kv.ffi()` 加载 DLL 并调用其函数。
-这是唯一能验证「PyLite 源码 → 编译 → 链接 → 加载 DLL → 调用」整条链路的
+C++ 宿主 + Xmex 脚本，脚本里 `kv.ffi()` 加载 DLL 并调用其函数。
+这是唯一能验证「Xmex 源码 → 编译 → 链接 → 加载 DLL → 调用」整条链路的
 用例——`ffi_test` 只测 C++ 层的 `ffi.cpp`，测不到 irgen 的映射与 ABI 约定。
 
 ```bash
@@ -382,7 +382,7 @@ return id.c_str();     // ← 函数返回后 id 析构,指针失效
 **4. irgen 里的 `Value` 名字冲突（改名遗留，与 FFI 无关但阻断了验证）。**
 
 `irgen` 里裸写的 `Value` 一直指 `llvm::Value`（LLVM 的 SSA 值），
-但改名把 PyLite 的值类型也命名成了 `xmex::Value`，两者同在 `namespace xmex` 里。
+但改名把 Xmex 的值类型也命名成了 `xmex::Value`，两者同在 `namespace xmex` 里。
 近邻查找规则让裸 `Value` 解析到 `xmex::Value`，于是：
 
 ```
