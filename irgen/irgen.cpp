@@ -414,6 +414,29 @@ Value *IRGen::genMethodCall(const Call *e, const Attribute *attr) {
 
 // 内置模块名 → 运行时函数前缀映射
 // 让 Xmex 脚本能直接写 docker.run()、llm.chat() 等原生语法
+// 某些内置函数的尾部参数是可选的(用户在调用点可以不写)。
+//
+// 为什么需要这张表:irgen 按**调用点的实际实参个数**生成 IR,同一个 C 符号
+// 在不同调用点参数个数不同就会生成两种函数原型;而 abi_.getOrDeclare 明确
+// 拒绝"同符号两种签名"(宁可编译期炸,也不要链接通过、运行时段错误)。
+// 所以可选参数必须在这里补齐到固定元数,让所有调用点形状一致。
+//
+// 缺失的参数补 None(空指针),C 侧 va_arg 取到 0 后按默认值处理。
+//
+// ⚠️ C 侧必须用**可变参数**(`...`)才能接受 —— LLVM 层无法表达 C 变参,
+// 声明时还是按固定个数生成函数类型。
+static size_t builtinOptionalArgs(const char *rtFn) {
+  // http.get(url, timeout) / post(url, body, timeout) / head(url, timeout)
+  if (std::string(rtFn) == "http_get_v") return 2;
+  if (std::string(rtFn) == "http_post_v") return 3;
+  if (std::string(rtFn) == "http_head_v") return 2;
+  // http.request(method, url, body, timeout, token, headers)
+  if (std::string(rtFn) == "http_request_v") return 6;
+  // kv.reconcile_start(interval_ms) —— 允许不传(默认 1s)
+  if (std::string(rtFn) == "kv_reconcile_start_v") return 1;
+  return 0;   // 0 = 无需补齐
+}
+
 static const char *builtinModulePrefix(const std::string &mod, const std::string &fn) {
   // Docker 模块
   if (mod == "docker") {
@@ -597,6 +620,14 @@ static const char *builtinModulePrefix(const std::string &mod, const std::string
     if (fn == "kset") return "kv_kset_v";
     if (fn == "kget") return "kv_kget_v";
   }
+  // 通用 HTTP 客户端(2026-10 增补):接口测试用,能打任意 URL。
+  // 详见 include/xmex/runtime.h 的说明与 docs/http-design.md。
+  if (mod == "http") {
+    if (fn == "get") return "http_get_v";
+    if (fn == "post") return "http_post_v";
+    if (fn == "head") return "http_head_v";
+    if (fn == "request") return "http_request_v";
+  }
   // 本地文件操作模块（节点落盘代码供编译,2026-10 增补）
   if (mod == "fio") {
     if (fn == "write") return "file_write_v";
@@ -703,6 +734,18 @@ Value *IRGen::genCall(const Call *e) {
         for (const auto &a : e->args) {
           Value *slot = genExpr(a.get());
           argSlots.push_back(slot);
+          argTypes.push_back(abi_.ptrTy());
+        }
+
+        // 可选参数补齐(见 builtinOptionalArgs 的注释)。
+        // 同一个 C 符号在不同调用点实参个数不同时,abi_.getOrDeclare 会
+        // 报"运行时函数被两种签名声明过" —— 那是致命错误,直接终止编译。
+        // 所以这里按该函数的固定元数把缺失的尾参数补成 None。
+        size_t want = builtinOptionalArgs(rtFn);
+        while (argSlots.size() < want) {
+          Value *n = abi_.newSlot(B_, "opt.none");
+          abi_.storeNone(B_, n);
+          argSlots.push_back(n);
           argTypes.push_back(abi_.ptrTy());
         }
 

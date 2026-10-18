@@ -636,6 +636,35 @@ xmex::Value kv_iter_destroy(const xmex::Value *it);
 // 详见 docs/distributed-reconcile-design.md
 xmex::Value kv_reconcile_start(const xmex::Value *interval_ms);
 
+// ---- 通用 HTTP 客户端(2026-10 增补)----
+// 能打**任意** URL,供接口测试用。cluster.query 只能对已注册的 cluster
+// 节点调用,且要 secret —— 测第三方接口时用不上。
+//
+//   http.get(url[, timeout_ms]) -> 响应 JSON
+//   http.post(url, body[, timeout_ms]) -> 响应 JSON
+//   http.head(url[, timeout_ms]) -> 响应 JSON(无 body,状态码齐全)
+//   http.request(method, url[, body, timeout_ms, token, headers])
+//
+// 响应 JSON 形如:
+//   {"ok":true,"status":200,"elapsed_ms":12,"content_length":18,
+//    "body":"...","headers":"HTTP/1.1 200 OK\r\n..."}
+//
+// 刻意不做:连接池、异步、自动重定向跟随、自动重试、multipart。
+// 接口测试要"看得见每一步" —— 自动重试会把刚注入的故障冲掉,重定向跟随
+// 会让"接口返回了 302"这个事实被藏起来。
+xmex::Value http_get_v(const xmex::Value *url, ...);
+xmex::Value http_post_v(const xmex::Value *url, const xmex::Value *body, ...);
+xmex::Value http_head_v(const xmex::Value *url, ...);
+// ⚠️ 可变参数是**必需的**,不是偷懒。
+// IRGen 按**调用点的实际实参个数**生成 IR(见 irgen.cpp 的 genCall:argTypes
+// 逐个 push),所以 `http.request(m,u)` 与 `http.request(m,u,b,t,k,h)` 会
+// 生成两个**不同签名**的调用。固定 6 参的 C 函数会让少传参数的调用点
+// 在 LLVM 校验时报 "Incorrect number of arguments passed to called function"。
+//
+// 变参让任意个数的调用都落到同一个 C 符号上,缺失的参数就是 va_arg 取到的
+// 0(空指针),由实现侧按默认值补齐。
+xmex::Value http_request_v(const xmex::Value *method, const xmex::Value *url, ...);
+
 // ---- 容器节点(2026-10 增补)----
 // 与 kv.add 平行但作用于 Docker 容器。刻意不并入 kv.add 的参数:
 // 一个纳管本机进程(fork/exec + SIGSTOP/SIGKILL),一个跑容器

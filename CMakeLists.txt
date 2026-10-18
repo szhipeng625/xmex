@@ -75,6 +75,11 @@ set(XMEX_RUNTIME_SOURCES
   # ffi_api.cpp 提供 kv.ffi()/kv.ffi_list() 与实例方法注册。
   # 同样跨平台:它只依赖运行时自身的 Value/Dict/List API。
   runtime/ffi_api.cpp
+  # 通用 HTTP 客户端:能打任意 URL,接口测试用。http.cpp 只依赖
+  # platform.h 的 socket 抽象,所以跨平台。TLS 只在 Linux 侧可用
+  # (OpenSSL 只在那个平台链),https 在 Windows 上明确报不支持。
+  runtime/http.cpp
+  runtime/http_api.cpp
   # 平台抽象:管道 + 子进程 spawn(Windows CreateProcess / POSIX fork+exec)。
   # FFI 隔离模式要用它起 agent 子进程。
   runtime/platform_proc.cpp
@@ -247,6 +252,47 @@ target_link_libraries(ffi_test PRIVATE ffi_test_dll)
 add_test(NAME ffi_test COMMAND ffi_test)
 set_tests_properties(ffi_test PROPERTIES
   WORKING_DIRECTORY $<TARGET_FILE_DIR:ffi_test>)
+
+# HTTP 客户端测试:在测试进程里起一个最小 HTTP 服务端(裸 socket),
+# 然后用 http_get/http_post 真打它。测的是真链路 —— 真 TCP、真 HTTP 报文、
+# 真 chunked 解码,不是 mock。链接上 http_api 才能验到语言层边界。
+add_executable(http_test tests/http_test.cpp runtime/http.cpp)
+target_include_directories(http_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/runtime)
+# 测试里用了 std::this_thread::sleep_for —— Windows 上需要 winpthread
+# (nanosleep64 在那儿,裸 connect 用不到但 std::thread 会链到)。
+if(WIN32)
+  target_link_libraries(http_test PRIVATE ws2_32 winpthread)
+else()
+  target_link_libraries(http_test PRIVATE ssl crypto pthread)
+endif()
+add_test(NAME http_test COMMAND http_test)
+
+# 语言层边界的验证:PyLite 脚本调 http.get 打真实服务。
+# 这里必须链 xmex_runtime —— http_api.cpp 用的是运行时的 str_new/dict_*,
+# 缺了链接不过。端到端跑的是真链路:C++ 宿主 + 编译后的 .o + 真实 HTTP。
+add_executable(http_api_demo examples/http_demo_main.cpp)
+target_include_directories(http_api_demo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+set(HTTP_DEMO_OBJ ${CMAKE_CURRENT_BINARY_DIR}/http_demo.o)
+add_custom_command(
+  OUTPUT ${HTTP_DEMO_OBJ}
+  COMMAND xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/http_demo.pys
+          -o ${HTTP_DEMO_OBJ} -I http_demo
+  DEPENDS xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/http_demo.pys
+  COMMENT "xmexc examples/http_demo.pys")
+add_custom_target(http_demo_obj DEPENDS ${HTTP_DEMO_OBJ})
+
+add_dependencies(http_api_demo http_demo_obj)
+target_sources(http_api_demo PRIVATE ${HTTP_DEMO_OBJ})
+target_link_libraries(http_api_demo PRIVATE xmex_runtime)
+
+# 演示脚本自带一个最小 HTTP 服务端(用 kv.ffi 加载一个测试用的 .so? 不行 ——
+# 那依赖 DLL)。改成让脚本只打一个外部传入的地址,默认打 127.0.0.1:9 让它
+# 快速失败,只验证"调用链通、错误可读"。真打业务的例子见 examples/http_demo.pys。
+add_test(NAME http_api_demo COMMAND http_api_demo)
+set_tests_properties(http_api_demo PROPERTIES
+  WORKING_DIRECTORY $<TARGET_FILE_DIR:http_api_demo>)
 
 # FFI 隔离模式的 agent:独立可执行文件,加载 DLL 并处理宿主的管道请求。
 #

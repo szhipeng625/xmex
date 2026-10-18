@@ -1,0 +1,64 @@
+# http_demo.pys -- HTTP client demo / API test example
+#
+# Shows the http.* module used from PyLite.
+# The return value is a JSON string containing ok/status/elapsed_ms/body.
+#
+# NOTE: .pys files must not contain non-ASCII characters -- the lexer
+# rejects them. Keep comments in English here.
+
+# ---- 1. GET ----
+# Port 1 is closed, so this fails fast. That is on purpose: we want to
+# see what a connection failure looks like before testing a real service.
+r = http.get("http://127.0.0.1:1/hello", 1000)
+print("GET failed-fast:", r)
+
+# ---- 2. Basic usage on a real service ----
+# Replace with your own address. Docker example:
+#   kv.container_add("api", "nginx:alpine", "", "0.5", "128m")
+#   then use http://127.0.0.1:8080/
+base = "http://127.0.0.1:8080"
+
+r = http.get(base + "/api/v1/health", 3000)
+print("health:", r)
+
+# ---- 3. POST with JSON body ----
+r = http.post(base + "/api/v1/users",
+              "{\"name\":\"alice\",\"age\":30}", 3000)
+print("create user:", r)
+
+# ---- 4. Custom headers (auth token, request id) ----
+# Pass {"key": "value"} -- or [["key","value"]] when a header may repeat.
+r = http.request("GET", base + "/api/v1/orders",
+                 "", 5000,
+                 "my-secret-token",
+                 {"X-Request-Id": "req-001"})
+print("with auth:", r)
+
+# ---- 5. Arbitrary method ----
+r = http.request("DELETE", base + "/api/v1/orders/42", "", 3000)
+print("delete:", r)
+
+# ---- 6. HEAD as a liveness probe ----
+# HEAD returns no body but gives status + headers, cheap for health checks.
+r = http.head(base + "/api/v1/health", 2000)
+print("head:", r)
+
+# ---- 7. Timeout behaviour ----
+# A 500ms budget against a slow endpoint. It should return a timeout error
+# quickly instead of hanging the whole test run.
+r = http.get(base + "/api/v1/slow", 500)
+print("timeout:", r)
+
+# ---- 8. Pairing with fault injection ----
+# http.* for request, kv.container_* for making the target misbehave.
+#
+# kv.container_add("api", "nginx:alpine", "", "", "")
+# kv.reconcile_start(1000)
+# print(http.get("http://127.0.0.1:8080/ping"))   # should be 200
+# kv.container_pause("api")                        # freeze it
+# print(http.get("http://127.0.0.1:8080/ping"))   # should time out
+# kv.container_unpause("api")
+# kv.container_crash("api")                        # kill it
+# sleep_ms(3000)                                    # let reconcile restart
+# print(http.get("http://127.0.0.1:8080/ping"))   # should be 200 again
+print("see docs/http-design.md for the full workflow")

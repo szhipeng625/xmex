@@ -301,7 +301,47 @@ init 的 pid 也没用——那是容器命名空间里的 pid,SIGKILL 它要么
 
 完整例子:[examples/container_test_demo.pys](examples/container_test_demo.pys)。
 
-### 8. 进程纳管与调谐(Linux)
+### 8. 测接口(跨平台)
+
+`http.*` 能打任意 URL,配合容器做故障注入:
+
+```python
+r = http.get("http://api.example.com:8080/health", 3000)
+print(r)                  # {"ok":true,"status":200,"elapsed_ms":12,"body":"..."}
+
+http.post(url, "{\"name\":\"alice\"}", 3000)
+http.head(url, 2000)                            # 探活:有状态码与头,无 body
+http.request("DELETE", url, "", 3000)
+http.request("GET", url, "", 5000, "token", {"X-Api-Key": "k"})   # 自定义头
+```
+
+| | 进程 | 容器 |
+|---|---|---|
+| 判活 | `waitpid(WNOHANG)` | `docker inspect {{.State.Status}}` |
+| 暂停 | `SIGSTOP` | `docker pause` |
+| 崩溃 | `kill(pid, SIGKILL)` | `docker kill` |
+| 限额 | 未实现 | `--cpus` / `--memory` |
+
+配起来测(见 `examples/http_demo.pys`):
+
+```python
+kv.container_add("api", "nginx:alpine", "", "0.5", "128m")
+kv.reconcile_start(1000)
+print(http.get("http://127.0.0.1:8080/ping"))   # 200
+kv.container_pause("api")
+print(http.get("http://127.0.0.1:8080/ping"))   # 超时(服务冻结了)
+kv.container_unpause("api")
+kv.container_crash("api")
+sleep_ms(3000)
+print(http.get("http://127.0.0.1:8080/ping"))   # 调谐重启后恢复 200
+```
+
+**刻意不做**:连接池、异步、**自动重试**、**重定向跟随**。测试要"每一步看得见"
+——自动重试会把刚注入的故障冲掉,重定向跟随会把"返回了 302"这个事实藏起来。
+
+细节见 [docs/http-design.md](docs/http-design.md)。
+
+### 9. 进程纳管与调谐(Linux)
 
 `kv.add` 纳管一个**可执行文件** —— 和 `kv.ffi` 加载动态库是两回事,别混用。
 
@@ -346,6 +386,9 @@ kv.group_status("shard-1")
 | `kv.ffi` 报 `dlopen failed` | 路径不对,或依赖的 DLL 不在同目录(Windows 上要放在 exe 旁边) |
 | `kv.ffi_isolated` 卡住不动 | 默认 5 秒超时。若仍卡住,检查是否在超时前就 spawn 失败(看 stderr) |
 | `kv.ffi_isolated` 报 `worker crashed` | 这是**预期行为** —— DLL 崩了,只有子进程死,宿主活着 |
+| `http.get` 报 `connection failed` 且耗时≈timeout | 正常,连不上要等满超时。端口不通的话立刻返回才是意外 |
+| `http.*` 报 `https not supported` | Windows 构建没链 OpenSSL。用 http 代替,或把服务跑在 Linux 侧 |
+| 加了可选参数后编译报 `Incorrect number of arguments` | 忘了在 `irgen.cpp` 的 `builtinOptionalArgs` 里登记元数 |
 | `kv.add` / `kv.group_*` 报未定义 | 这些是 **Linux only**,Windows 上没有(见「平台差异」) |
 | `kv.reconcile_*` 报未定义 | 同上,Linux only |
 | `kv.container_*` 报未定义 | Linux only,且需要 docker CLI 与 daemon 权限 |
@@ -454,6 +497,17 @@ kv.group_status("shard-1")
   要判「DLL 已就绪」得自己查 `--ready-file` 或发 `ping`
 - 跨进程时字符串要序列化:进程内传的是指针,跨进程必须传内容
 - 动态库崩了退出码统一成 POSIX 风格(128+signal),Windows 的 NTSTATUS 已折算
+
+### HTTP 客户端
+
+- **https 只在 Linux 可用**。OpenSSL 只在那个平台链接;Windows 上 https 会明确
+  报"不支持"而不是静默降级成明文
+- 超时覆盖连接与读响应两个阶段,但**不含 DNS 解析**(Windows 上 `getaddrinfo`
+  是阻塞调用,域名解析慢时不受 timeout_ms 约束)
+- 不支持 multipart/form-data;要传文件得自己拼 body 并设 `Content-Type`
+- **加可选参数的内置函数时要同步改 `builtinOptionalArgs`**(见
+  [docs/http-design.md](docs/http-design.md) 第 2.4 节)—— irgen 按调用点的
+  实参个数生成 IR,不补齐会直接编译失败
 
 ### 分布式
 
