@@ -294,6 +294,13 @@ add_test(NAME http_api_demo COMMAND http_api_demo)
 set_tests_properties(http_api_demo PROPERTIES
   WORKING_DIRECTORY $<TARGET_FILE_DIR:http_api_demo>)
 
+# ---- acmdog 测试套件与 CI/CD runner(仅 Linux)----
+#
+# 这些 .pys 都用了 kv.add / kv.status / kv.erase / kv.stop —— 那些符号来自
+# runtime/kv_admin_api.cpp,在 if(NOT WIN32) 段里,Windows 上不存在。
+# 所以整个块必须放进平台守卫,否则 Windows 构建会在**链接**阶段失败:
+# 编译能过(irgen 只是生成对 kv_add_v 的调用),链接器找不到符号才报。
+if(NOT WIN32)
 # CI/CD runner:用 Xmex 编写的轮询式流水线执行器。
 # 结构同 http_api_demo:C++ 宿主 + 编译后的 .o + 运行时。
 add_executable(cicd_runner examples/cicd_runner_main.cpp)
@@ -396,6 +403,8 @@ add_custom_target(integration_full_obj DEPENDS ${INTEGRATION_OBJ})
 add_dependencies(integration_full integration_full_obj)
 target_sources(integration_full PRIVATE ${INTEGRATION_OBJ})
 target_link_libraries(integration_full PRIVATE xmex_runtime)
+
+endif()
 
 # FFI 隔离模式的 agent:独立可执行文件,加载 DLL 并处理宿主的管道请求。
 #

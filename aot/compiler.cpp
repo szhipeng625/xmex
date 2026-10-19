@@ -39,9 +39,18 @@ std::unique_ptr<TargetMachine> makeTargetMachine(const Triple &TT, std::string *
   auto relocModel = std::optional<Reloc::Model>(Reloc::PIC_);
   // LLVM 20 的 createTargetMachine 收 StringRef,LLVM 22 收 Triple;
   // 传 TT.str()(std::string)对两者都能隐式转换,版本间都编得过。
+#if LLVM_VERSION_MAJOR >= 22
+  // LLVM 22 的成员函数收 const Triple&,而 TT.str() 是 std::string —— 两者
+  // 没有隐式转换方向(std::string → Triple 不行)。直接传 Triple。
+  auto TM = std::unique_ptr<TargetMachine>(T->createTargetMachine(
+      TT, /*CPU=*/"generic", /*Features=*/"", opt, relocModel,
+      std::nullopt, CodeGenOptLevel::Default));
+#else
+  // LLVM 20 及更早收 StringRef,TT.str() 可隐式转换。
   auto TM = std::unique_ptr<TargetMachine>(T->createTargetMachine(
       TT.str(), /*CPU=*/"generic", /*Features=*/"", opt, relocModel,
       std::nullopt, CodeGenOptLevel::Default));
+#endif
   if (!TM && error) *error = "无法为目标平台创建 TargetMachine";
   return TM;
 }
@@ -93,7 +102,13 @@ bool emitObjectFile(Module &M, const std::string &outPath, std::string *error) {
   auto TM = makeTargetMachine(TT, error);
   if (!TM) return false;
 
-  M.setTargetTriple(TT.str());   // LLVM 20 收 StringRef;Triple.str() 兼容各版本
+  #if LLVM_VERSION_MAJOR >= 22
+  // Module::setTargetTriple 在 LLVM 22 收 const Triple&。TT.str() 是
+  // std::string,不能隐式转成 Triple,所以按版本分支。
+  M.setTargetTriple(TT);
+#else
+  M.setTargetTriple(TT.str());
+#endif
   M.setDataLayout(TM->createDataLayout());
 
   runOptimizationPipeline(M, *TM);
@@ -125,7 +140,13 @@ bool emitIRText(Module &M, const std::string &outPath, std::string *error) {
   auto TM = makeTargetMachine(TT, error);
   if (!TM) return false;
 
-  M.setTargetTriple(TT.str());   // LLVM 20 收 StringRef;Triple.str() 兼容各版本
+  #if LLVM_VERSION_MAJOR >= 22
+  // Module::setTargetTriple 在 LLVM 22 收 const Triple&。TT.str() 是
+  // std::string,不能隐式转成 Triple,所以按版本分支。
+  M.setTargetTriple(TT);
+#else
+  M.setTargetTriple(TT.str());
+#endif
   M.setDataLayout(TM->createDataLayout());
 
   std::error_code ec;

@@ -381,7 +381,7 @@ kv.group_status("shard-1")
 | 链接报 `undefined reference to 'add'` | 忘了 `-lxmex_runtime` |
 | 编译成功、链接成功,一运行就段错误 | 几乎总是 ABI 边界问题 —— 见下节第 1 点 |
 | 中文输出在测试里比对失败 | 比对框架只支持 ASCII 输出,见 `tests/compare_output.cmake` |
-| `.pys` 里有中文注释就编译失败 | 词法器不接受非 ASCII 字符,`.pys` 的注释必须用英文 |
+| `.pys` 里有中文**标识符**就编译失败 | 注释与字符串字面量支持非 ASCII;但变量名/函数名必须是 ASCII |
 | `kv.ffi` 报 `symbol not found: xxx` | 动态库的符号被 C++ mangle 了,导出函数必须写在 `extern "C"` 里 |
 | `kv.ffi` 报 `dlopen failed` | 路径不对,或依赖的 DLL 不在同目录(Windows 上要放在 exe 旁边) |
 | `kv.ffi_isolated` 卡住不动 | 默认 5 秒超时。若仍卡住,检查是否在超时前就 spawn 失败(看 stderr) |
@@ -480,8 +480,8 @@ kv.group_status("shard-1")
 - `a[i] += 1` 这类复合赋值尚未支持(`a[i] = ...` 支持)
 - 整数是 64 位,不会自动提升为任意精度
 - 没有 `import`、生成器、推导式、JIT REPL
-- **`.pys` 源文件里不能出现非 ASCII 字符** —— 词法器不接受,中文注释会报
-  「无法识别的字串」
+- **`.pys` 里的标识符必须是 ASCII** —— 变量名、函数名不能用中文。注释与字符串
+  字面量**支持**非 ASCII(实测中文注释可正常编译运行)
 
 支持类(`class`):单继承、`__init__`、属性读写、方法调用,实例属性表复用字典实现。
 
