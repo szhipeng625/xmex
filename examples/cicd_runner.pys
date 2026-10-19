@@ -1,0 +1,104 @@
+# cicd_runner.pys -- polling CI/CD runner written in Xmex.
+# Replaces the stock GitHub Actions self-hosted runner with a light loop:
+# poll -> claim -> run -> report.
+# NOTE: comments and string literals accept non-ASCII text (e.g. Chinese).
+
+OWNER = "acmdog"
+REPO = "acmdog"
+API = "https://api.github.com"
+REPO_ROOT = "/home/ubuntu/xmex"
+BUILD_DIR = "/home/ubuntu/xmex/build"
+POLL_ROUNDS = 3
+
+# Pull one field out of a flat JSON document by scanning for the key.
+def jraw(s: str, key: str) -> str:
+    pat = "\"" + key + "\":"
+    i = s.find(pat)
+    if i < 0:
+        return ""
+    start = i + len(pat)
+    j = start
+    while j < len(s):
+        c = s[j]
+        if c == ",":
+            break
+        if c == "}":
+            break
+        if c == "]":
+            break
+        j += 1
+    return s[start:j].strip()
+
+# Ask the API for queued workflow runs of the target repository.
+def poll() -> str:
+    API = "https://api.github.com"
+    OWNER = "acmdog"
+    REPO = "acmdog"
+    url = API + "/repos/" + OWNER + "/" + REPO + "/actions/runs?status=queued"
+    print("[poll] GET " + url)
+    return http.get(url, 8000)
+
+# Decide whether the response carries a usable run id.
+def inspect(r: str) -> str:
+    ok = jraw(r, "ok")
+    code = jraw(r, "status")
+    print("[poll] ok=" + ok + " http=" + code)
+    if ok != "true":
+        return ""
+    if code != "200":
+        return ""
+    return jraw(r, "id")
+
+# The step table the runner would read from a workflow file.
+def plan_steps():
+    REPO_ROOT = "/home/ubuntu/xmex"
+    BUILD_DIR = "/home/ubuntu/xmex/build"
+    steps = []
+    steps.append(["checkout", "git -C " + REPO_ROOT + " rev-parse --short HEAD"])
+    steps.append(["build", "cmake --build " + BUILD_DIR + " -j4"])
+    steps.append(["test", "ctest --test-dir " + BUILD_DIR + " -R frontend_test --output-on-failure"])
+    return steps
+
+# Each step is launched as a managed process node; the process layer
+# reports the observed state of that node.
+def execute(name: str, cmd: str) -> bool:
+    REPO_ROOT = "/home/ubuntu/xmex"
+    node = "cicd-" + name
+    print("[exec] " + name + ": " + cmd)
+    args = "[\"-c\",\"" + cmd + "\"]"
+    res = kv.add(node, "/bin/bash", args, REPO_ROOT, "")
+    print("[exec] add -> " + res)
+    st = kv.status(node)
+    print("[exec] status -> " + st)
+    state = jraw(st, "state")
+    print("[exec] state=" + state)
+    if state == "unknown":
+        return False
+    return True
+
+print("=== Xmex CI/CD runner ===")
+print("[cfg] repo=" + OWNER + "/" + REPO)
+
+claimed = ""
+i = 0
+while i < POLL_ROUNDS:
+    i += 1
+    r = poll()
+    claimed = inspect(r)
+    if claimed != "":
+        print("[claim] run id=" + claimed)
+        break
+
+if claimed == "":
+    print("[claim] no queued run reachable, running local pipeline")
+    claimed = "local"
+
+steps = plan_steps()
+total = 0
+for s in steps:
+    total += 1
+    execute(s[0], s[1])
+
+print("[report] run=", claimed)
+print("[report] steps=", total)
+print("[report] DONE")

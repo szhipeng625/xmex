@@ -120,7 +120,7 @@ bool parse_url(const std::string& url, std::string& host, int& port,
 void set_nonblocking(int sock) {
 #ifdef XMEX_WINDOWS
     u_long nb = 1;
-    ioctlsocket((SOCKET)sock, FIONBIO, &nb);
+    ioctlsocket((xmex_socket_t)sock, FIONBIO, &nb);
 #else
     int flags = fcntl(sock, F_GETFL, 0);
     fcntl(sock, F_SETFL, flags | O_NONBLOCK);
@@ -131,7 +131,7 @@ void set_nonblocking(int sock) {
 void set_blocking(int sock) {
 #ifdef XMEX_WINDOWS
     u_long block = 0;
-    ioctlsocket((SOCKET)sock, FIONBIO, &block);
+    ioctlsocket((xmex_socket_t)sock, FIONBIO, &block);
 #else
     int flags = fcntl(sock, F_GETFL, 0);
     fcntl(sock, F_SETFL, flags);   // 去掉 O_NONBLOCK
@@ -161,7 +161,7 @@ int tcp_connect(const std::string& host, int port, int64_t timeout_ms) {
     fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 #else
     u_long nonblock = 1;
-    ioctlsocket((SOCKET)sock, FIONBIO, &nonblock);
+    ioctlsocket((xmex_socket_t)sock, FIONBIO, &nonblock);
 #endif
 
     struct addrinfo hints{};
@@ -179,7 +179,7 @@ int tcp_connect(const std::string& host, int port, int64_t timeout_ms) {
         return -1;
     }
 
-    int ret = connect((SOCKET)sock, res->ai_addr, (int)res->ai_addrlen);
+    int ret = connect((xmex_socket_t)sock, res->ai_addr, (int)res->ai_addrlen);
 #ifdef XMEX_WINDOWS
     int wsa_err = WSAGetLastError();
 #endif
@@ -208,7 +208,7 @@ int tcp_connect(const std::string& host, int port, int64_t timeout_ms) {
 
     fd_set wfds;
     FD_ZERO(&wfds);
-    FD_SET((SOCKET)sock, &wfds);
+    FD_SET((xmex_socket_t)sock, &wfds);
     struct timeval tv;
     tv.tv_sec = (long)(timeout_ms / 1000);
     tv.tv_usec = (long)((timeout_ms % 1000) * 1000);
@@ -218,7 +218,7 @@ int tcp_connect(const std::string& host, int port, int64_t timeout_ms) {
     int err = 0;
 #ifdef XMEX_WINDOWS
     int len = sizeof(err);
-    getsockopt((SOCKET)sock, SOL_SOCKET, SO_ERROR, (char*)&err, &len);
+    getsockopt((xmex_socket_t)sock, SOL_SOCKET, SO_ERROR, (char*)&err, &len);
 #else
     socklen_t len = sizeof(err);
     getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &len);
@@ -358,8 +358,8 @@ HttpResponse http_send(const HttpRequest& req) {
     struct timeval tv;
     tv.tv_sec = (long)(req.timeout_ms / 1000);
     tv.tv_usec = (long)((req.timeout_ms % 1000) * 1000);
-    setsockopt((SOCKET)sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
-    setsockopt((SOCKET)sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof(tv));
+    setsockopt((xmex_socket_t)sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+    setsockopt((xmex_socket_t)sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof(tv));
 
     // ---- 构建请求 ----
     std::ostringstream out;
@@ -398,17 +398,17 @@ HttpResponse http_send(const HttpRequest& req) {
     // 分成两个 #ifdef 分支是因为 SSL_write/SSL_read 名字在无 OpenSSL 时不存在。
 #ifdef XMEX_HTTP_HAVE_TLS
     auto send_all = [&](const char* p, int n) -> ssize_t {
-        return ssl ? SSL_write(ssl, p, n) : send((SOCKET)sock, p, n, 0);
+        return ssl ? SSL_write(ssl, p, n) : send((xmex_socket_t)sock, p, n, 0);
     };
     auto recv_some = [&](char* p, int n) -> ssize_t {
-        return ssl ? SSL_read(ssl, p, n) : recv((SOCKET)sock, p, n, 0);
+        return ssl ? SSL_read(ssl, p, n) : recv((xmex_socket_t)sock, p, n, 0);
     };
 #else
     auto send_all = [&](const char* p, int n) -> ssize_t {
-        return send((SOCKET)sock, p, n, 0);
+        return send((xmex_socket_t)sock, p, n, 0);
     };
     auto recv_some = [&](char* p, int n) -> ssize_t {
-        return recv((SOCKET)sock, p, n, 0);
+        return recv((xmex_socket_t)sock, p, n, 0);
     };
 #endif
 
@@ -444,7 +444,7 @@ HttpResponse http_send(const HttpRequest& req) {
 
         fd_set rfds;
         FD_ZERO(&rfds);
-        FD_SET((SOCKET)sock, &rfds);
+        FD_SET((xmex_socket_t)sock, &rfds);
         struct timeval rtv;
         rtv.tv_sec = (long)(remain / 1000);
         rtv.tv_usec = (long)((remain % 1000) * 1000);

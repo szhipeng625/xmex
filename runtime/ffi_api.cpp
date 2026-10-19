@@ -27,6 +27,12 @@
 #include <string>
 #include <mutex>
 
+#ifdef XMEX_WINDOWS
+  #include <windows.h>
+#elif defined(XMEX_LINUX)
+  #include <unistd.h>
+#endif
+
 namespace {
 
 const int64_t FFI_CLASS_ID = 20;   // 实例类型 id,与其他模块错开
@@ -134,6 +140,7 @@ static std::string agent_path() {
     if (env && *env) return env;
 
     // 从宿主可执行文件的路径推出同目录的 agent
+#ifdef XMEX_WINDOWS
     char buf[1024] = {0};
     DWORD n = GetModuleFileNameA(nullptr, buf, (DWORD)sizeof(buf) - 1);
     if (n > 0 && n < sizeof(buf)) {
@@ -144,6 +151,21 @@ static std::string agent_path() {
             return dir + "/xmex_ffi_agent" + XMEX_EXE_EXT;
         }
     }
+#endif
+
+#ifndef XMEX_WINDOWS
+    char buf[1024] = {0};
+    ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (n > 0 && n < static_cast<ssize_t>(sizeof(buf))) {
+        buf[n] = '\0';
+        std::string self(buf, static_cast<size_t>(n));
+        size_t slash = self.find_last_of('/');
+        if (slash != std::string::npos) {
+            std::string dir = self.substr(0, slash);
+            return dir + "/xmex_ffi_agent" + XMEX_EXE_EXT;
+        }
+    }
+#endif
     return std::string("xmex_ffi_agent") + XMEX_EXE_EXT;
 }
 

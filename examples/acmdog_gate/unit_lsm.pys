@@ -1,0 +1,103 @@
+# unit_lsm.pys -- Xmex port of tests/test_lsm_smoke.py (unit scope).
+# The original speaks the RESP wire protocol over raw sockets. This
+# language exposes no raw socket API, so protocol handshakes are
+# replaced by process-liveness checks via the managed process layer.
+# That difference is reported, not hidden.
+
+LSM_BIN = "/home/ubuntu/actions-runner/acmdog/ACMDOG/ACMDOG/deploy/lsm/lsm_server"
+LSM_CFG = "/home/ubuntu/actions-runner/acmdog/ACMDOG/ACMDOG/deploy/lsm/config.toml"
+NODE = "ut-lsm"
+
+def jraw(s: str, key: str) -> str:
+    pat = "\"" + key + "\":"
+    i = s.find(pat)
+    if i < 0:
+        return ""
+    start = i + len(pat)
+    j = start
+    while j < len(s):
+        c = s[j]
+        if c == ",":
+            break
+        if c == "}":
+            break
+        if c == "]":
+            break
+        j += 1
+    v = s[start:j].strip()
+    if len(v) >= 2:
+        if v[0] == "\"":
+            if v[len(v) - 1] == "\"":
+                return v[1:len(v) - 1]
+    return v
+
+def record(name: str, ok: bool, detail: str):
+    if ok:
+        print("[PASS]", name, "|", detail)
+    else:
+        print("[FAIL]", name, "|", detail)
+
+print("=== Xmex unit test: lsm ===")
+
+total = 0
+passed = 0
+
+# service_start: launch lsm_server as a managed node. The server reads
+# config.toml from its working directory, so work_dir points there.
+# A missing binary makes kv.add fail, covering binary presence too.
+total += 1
+res = kv.add(NODE, LSM_BIN, "[]", "/home/ubuntu/actions-runner/acmdog/ACMDOG/ACMDOG/deploy/lsm", "")
+started = jraw(res, "success")
+if started == "true":
+    passed += 1
+    record("service_start", True, "node=" + NODE)
+else:
+    record("service_start", False, res)
+
+# config_loaded: a node that parsed a bad config exits right away.
+# Still registered as running after a wait means config was accepted.
+total += 1
+sleep_ms(2000)
+st = kv.status(NODE)
+state = jraw(st, "state")
+if state == "running":
+    passed += 1
+    record("config_loaded", True, "state=running after config parse")
+else:
+    record("config_loaded", False, st)
+
+# liveness: second status probe after another wait, proving the
+# server stays alive instead of crashing soon after start.
+total += 1
+sleep_ms(2000)
+st = kv.status(NODE)
+state = jraw(st, "state")
+if state == "running":
+    passed += 1
+    record("liveness", True, "still running")
+else:
+    record("liveness", False, st)
+
+# teardown: stop node, force-kill leftover by name, verify node gone.
+total += 1
+kv.stop(NODE)
+kv.add(NODE + "-cleanup", "/usr/bin/pkill", "[\"-9\",\"-f\",\"lsm_server\"]", "/tmp", "")
+sleep_ms(1500)
+kv.erase(NODE + "-cleanup")
+st = kv.status(NODE)
+state = jraw(st, "state")
+if state == "stopped":
+    passed += 1
+    record("teardown", True, "node stopped")
+else:
+    record("teardown", False, st)
+kv.erase(NODE)
+
+print("")
+print("=== SUMMARY ===")
+print("total=", total)
+print("passed=", passed)
+if passed == total:
+    print("result: ALL PASSED")
+else:
+    print("result: FAILED")

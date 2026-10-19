@@ -1,0 +1,90 @@
+# unit_middleware.pys -- Xmex port of the middleware gate cases.
+# Original cases: compose yaml syntax + docker compose config check.
+# Both are one-shot commands judged by exit code. This language cannot
+# read exit codes directly, so each check is wrapped as:
+#   bash -c "check_cmd && tail -f /dev/null"
+# A passing check leaves a lingering node (state=running); a failing
+# check exits at once (node no longer running). That state is the verdict.
+
+MW_DIR = "/home/ubuntu/actions-runner/acmdog/ACMDOG/ACMDOG"
+NODE_YAML = "ut-mw-yaml"
+NODE_CFG = "ut-mw-config"
+
+def jraw(s: str, key: str) -> str:
+    pat = "\"" + key + "\":"
+    i = s.find(pat)
+    if i < 0:
+        return ""
+    start = i + len(pat)
+    j = start
+    while j < len(s):
+        c = s[j]
+        if c == ",":
+            break
+        if c == "}":
+            break
+        if c == "]":
+            break
+        j += 1
+    v = s[start:j].strip()
+    if len(v) >= 2:
+        if v[0] == "\"":
+            if v[len(v) - 1] == "\"":
+                return v[1:len(v) - 1]
+    return v
+
+def record(name: str, ok: bool, detail: str):
+    if ok:
+        print("[PASS]", name, "|", detail)
+    else:
+        print("[FAIL]", name, "|", detail)
+
+print("=== Xmex unit test: middleware ===")
+
+total = 0
+passed = 0
+
+# compose_yaml_valid: run the yaml checker, linger only on success.
+total += 1
+cmd = "python3 .github/scripts/check_yaml.py middleware/docker-compose.yml && tail -f /dev/null"
+kv.add(NODE_YAML, "/bin/bash", "[\"-c\",\"" + cmd + "\"]", MW_DIR, "")
+sleep_ms(2500)
+st = kv.status(NODE_YAML)
+if jraw(st, "state") == "running":
+    passed += 1
+    record("compose_yaml_valid", True, "yaml syntax ok")
+else:
+    record("compose_yaml_valid", False, st)
+
+# compose_middleware: docker compose config -q, linger only on success.
+total += 1
+cmd = "docker compose -f middleware/docker-compose.yml config -q && tail -f /dev/null"
+kv.add(NODE_CFG, "/bin/bash", "[\"-c\",\"" + cmd + "\"]", MW_DIR, "")
+sleep_ms(2500)
+st = kv.status(NODE_CFG)
+if jraw(st, "state") == "running":
+    passed += 1
+    record("compose_middleware", True, "compose config ok")
+else:
+    record("compose_middleware", False, st)
+
+# teardown: stop both check nodes and erase them.
+total += 1
+kv.stop(NODE_YAML)
+kv.stop(NODE_CFG)
+kv.erase(NODE_YAML)
+kv.erase(NODE_CFG)
+kv.add("ut-mw-clean", "/usr/bin/pkill", "[\"-9\",\"-f\",\"tail -f /dev/null\"]", "/tmp", "")
+sleep_ms(1000)
+kv.erase("ut-mw-clean")
+passed += 1
+record("teardown", True, "check nodes removed")
+
+print("")
+print("=== SUMMARY ===")
+print("total=", total)
+print("passed=", passed)
+if passed == total:
+    print("result: ALL PASSED")
+else:
+    print("result: FAILED")

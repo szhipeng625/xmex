@@ -89,7 +89,7 @@ void server_loop(int listen_sock) {
         struct timeval tv{0, 100000};   // 100ms 轮询退出标志
         fd_set rfds;
         FD_ZERO(&rfds);
-        FD_SET((SOCKET)listen_sock, &rfds);
+        FD_SET((xmex_socket_t)listen_sock, &rfds);
         if (select((int)listen_sock + 1, &rfds, nullptr, nullptr, &tv) <= 0) continue;
         int c = (int)accept(listen_sock, nullptr, nullptr);
         if (c < 0) continue;

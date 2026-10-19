@@ -3,8 +3,8 @@
 # Shows the http.* module used from Xmex.
 # The return value is a JSON string containing ok/status/elapsed_ms/body.
 #
-# NOTE: .pys files must not contain non-ASCII characters -- the lexer
-# rejects them. Keep comments in English here.
+# NOTE: comments and string literals accept non-ASCII text (e.g. Chinese),
+# so Chinese comments work fine. Identifiers still must be ASCII.
 
 # ---- 1. GET ----
 # Port 1 is closed, so this fails fast. That is on purpose: we want to

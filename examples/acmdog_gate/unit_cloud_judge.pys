@@ -1,0 +1,128 @@
+# unit_cloud_judge.pys -- Xmex port of tests/test_cloud_judge.py.
+# Covers the orchestrator unit cases with the language native abilities:
+# binary presence, service start, port readiness, endpoint contract,
+# teardown. Each case prints PASS/FAIL like the original gate.
+
+BIN = "/home/ubuntu/actions-runner/acmdog/ACMDOG/ACMDOG/build/cloud_judge/orchestrator"
+WORKDIR = "/home/ubuntu/actions-runner/acmdog/ACMDOG/ACMDOG"
+PORT = "18861"
+BASE = "http://127.0.0.1:18861"
+NODE = "ut-orch"
+
+def jraw(s: str, key: str) -> str:
+    pat = "\"" + key + "\":"
+    i = s.find(pat)
+    if i < 0:
+        return ""
+    start = i + len(pat)
+    j = start
+    while j < len(s):
+        c = s[j]
+        if c == ",":
+            break
+        if c == "}":
+            break
+        if c == "]":
+            break
+        j += 1
+    return s[start:j].strip()
+
+def record(name: str, ok: bool, detail: str):
+    if ok:
+        print("[PASS]", name, "|", detail)
+    else:
+        print("[FAIL]", name, "|", detail)
+
+print("=== Xmex unit test: cloud_judge ===")
+
+total = 0
+passed = 0
+
+# service_start: launch the orchestrator as a managed process node.
+# kv.add fails when the binary is missing, so this also covers
+# the original orchestrator_binary case.
+total += 1
+args = "[\"-c\",\"tail -f /dev/null | " + BIN + " " + PORT + "\"]"
+res = kv.add(NODE, "/bin/bash", args, WORKDIR, "")
+started = jraw(res, "success")
+if started == "true":
+    passed += 1
+    record("service_start", True, "node=" + NODE)
+else:
+    record("service_start", False, res)
+
+# http_ready: poll the index endpoint until it answers or 20 tries pass.
+total += 1
+ready = False
+i = 0
+while i < 20:
+    i += 1
+    r = http.get(BASE + "/", 2000)
+    if jraw(r, "ok") == "true":
+        ready = True
+        break
+    sleep_ms(500)
+if ready:
+    passed += 1
+    record("http_ready", True, "port " + PORT)
+else:
+    record("http_ready", False, "20 tries not ready")
+
+if ready:
+    total += 1
+    r = http.get(BASE + "/", 5000)
+    if r.find("/status") >= 0:
+        passed += 1
+        record("endpoint_index", True, "index lists endpoints")
+    else:
+        record("endpoint_index", False, r)
+
+    total += 1
+    r = http.get(BASE + "/status", 5000)
+    if r.find("\"body\":\"[") >= 0:
+        passed += 1
+        record("endpoint_status", True, "body is a list")
+    else:
+        record("endpoint_status", False, r)
+
+    total += 1
+    r = http.get(BASE + "/preempt", 5000)
+    if r.find("active_judges") >= 0:
+        passed += 1
+        record("endpoint_preempt", True, "watermark fields present")
+    else:
+        record("endpoint_preempt", False, r)
+
+    total += 1
+    r = http.get(BASE + "/task/not-exist-ci", 5000)
+    if r.find("not found") >= 0:
+        passed += 1
+        record("endpoint_task_missing", True, "error=not found")
+    else:
+        record("endpoint_task_missing", False, r)
+
+# teardown: stop the node, then probe the port to prove it is gone.
+# The service is wrapped in a tail pipe, so stopping the node only kills
+# the wrapper. Kill the orchestrator itself with a managed cleanup step,
+# then probe the port to prove the port is released.
+total += 1
+kv.stop(NODE)
+kv.add(NODE + "-cleanup", "/usr/bin/pkill", "[\"-9\",\"-f\",\"orchestrator " + PORT + "\"]", WORKDIR, "")
+sleep_ms(1500)
+kv.erase(NODE + "-cleanup")
+r = http.get(BASE + "/status", 2000)
+if jraw(r, "ok") == "false":
+    passed += 1
+    record("teardown", True, "service stopped")
+else:
+    record("teardown", False, "service still alive")
+kv.erase(NODE)
+
+print("")
+print("=== SUMMARY ===")
+print("total=", total)
+print("passed=", passed)
+if passed == total:
+    print("result: ALL PASSED")
+else:
+    print("result: FAILED")

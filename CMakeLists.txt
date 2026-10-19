@@ -208,7 +208,8 @@ if(NOT WIN32)
   add_executable(reconcile_test tests/reconcile_test.cpp
                  runtime/kv_admin.cpp runtime/lsm_client.cpp)
   target_include_directories(reconcile_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/runtime)
   target_link_libraries(reconcile_test PRIVATE pthread)
   add_test(NAME reconcile_test COMMAND reconcile_test)
 endif()
@@ -224,7 +225,8 @@ if(NOT WIN32)
   add_executable(container_test tests/container_test.cpp
                  runtime/kv_admin.cpp runtime/lsm_client.cpp)
   target_include_directories(container_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/runtime)
   target_link_libraries(container_test PRIVATE pthread)
   add_test(NAME container_test COMMAND container_test)
 endif()
@@ -291,6 +293,109 @@ target_link_libraries(http_api_demo PRIVATE xmex_runtime)
 add_test(NAME http_api_demo COMMAND http_api_demo)
 set_tests_properties(http_api_demo PROPERTIES
   WORKING_DIRECTORY $<TARGET_FILE_DIR:http_api_demo>)
+
+# CI/CD runner:用 Xmex 编写的轮询式流水线执行器。
+# 结构同 http_api_demo:C++ 宿主 + 编译后的 .o + 运行时。
+add_executable(cicd_runner examples/cicd_runner_main.cpp)
+target_include_directories(cicd_runner PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+set(CICD_RUNNER_OBJ ${CMAKE_CURRENT_BINARY_DIR}/cicd_runner.o)
+add_custom_command(
+  OUTPUT ${CICD_RUNNER_OBJ}
+  COMMAND xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/cicd_runner.pys
+          -o ${CICD_RUNNER_OBJ} -I cicd_runner
+  DEPENDS xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/cicd_runner.pys
+  COMMENT "xmexc examples/cicd_runner.pys")
+add_custom_target(cicd_runner_obj DEPENDS ${CICD_RUNNER_OBJ})
+
+add_dependencies(cicd_runner cicd_runner_obj)
+target_sources(cicd_runner PRIVATE ${CICD_RUNNER_OBJ})
+target_link_libraries(cicd_runner PRIVATE xmex_runtime)
+
+# ACMDOG cloud_judge 单元测试的 Xmex 版本。
+add_executable(unit_cloud_judge examples/acmdog_gate/unit_cloud_judge_main.cpp)
+target_include_directories(unit_cloud_judge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+set(UNIT_CJ_OBJ ${CMAKE_CURRENT_BINARY_DIR}/unit_cloud_judge.o)
+add_custom_command(
+  OUTPUT ${UNIT_CJ_OBJ}
+  COMMAND xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/acmdog_gate/unit_cloud_judge.pys
+          -o ${UNIT_CJ_OBJ} -I unit_cloud_judge
+  DEPENDS xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/acmdog_gate/unit_cloud_judge.pys
+  COMMENT "xmexc examples/acmdog_gate/unit_cloud_judge.pys")
+add_custom_target(unit_cloud_judge_obj DEPENDS ${UNIT_CJ_OBJ})
+
+add_dependencies(unit_cloud_judge unit_cloud_judge_obj)
+target_sources(unit_cloud_judge PRIVATE ${UNIT_CJ_OBJ})
+target_link_libraries(unit_cloud_judge PRIVATE xmex_runtime)
+
+# ACMDOG lsm 单元测试的 Xmex 版本。
+add_executable(unit_lsm examples/acmdog_gate/unit_lsm_main.cpp)
+target_include_directories(unit_lsm PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+set(UNIT_LSM_OBJ ${CMAKE_CURRENT_BINARY_DIR}/unit_lsm.o)
+add_custom_command(
+  OUTPUT ${UNIT_LSM_OBJ}
+  COMMAND xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/acmdog_gate/unit_lsm.pys
+          -o ${UNIT_LSM_OBJ} -I unit_lsm
+  DEPENDS xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/acmdog_gate/unit_lsm.pys
+  COMMENT "xmexc examples/acmdog_gate/unit_lsm.pys")
+add_custom_target(unit_lsm_obj DEPENDS ${UNIT_LSM_OBJ})
+
+add_dependencies(unit_lsm unit_lsm_obj)
+target_sources(unit_lsm PRIVATE ${UNIT_LSM_OBJ})
+target_link_libraries(unit_lsm PRIVATE xmex_runtime)
+
+# ACMDOG middleware 单元测试的 Xmex 版本。
+add_executable(unit_middleware examples/acmdog_gate/unit_middleware_main.cpp)
+target_include_directories(unit_middleware PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+set(UNIT_MW_OBJ ${CMAKE_CURRENT_BINARY_DIR}/unit_middleware.o)
+add_custom_command(
+  OUTPUT ${UNIT_MW_OBJ}
+  COMMAND xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/acmdog_gate/unit_middleware.pys
+          -o ${UNIT_MW_OBJ} -I unit_middleware
+  DEPENDS xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/acmdog_gate/unit_middleware.pys
+  COMMENT "xmexc examples/acmdog_gate/unit_middleware.pys")
+add_custom_target(unit_middleware_obj DEPENDS ${UNIT_MW_OBJ})
+
+add_dependencies(unit_middleware unit_middleware_obj)
+target_sources(unit_middleware PRIVATE ${UNIT_MW_OBJ})
+target_link_libraries(unit_middleware PRIVATE xmex_runtime)
+
+# ACMDOG nginx 单元测试的 Xmex 版本。
+add_executable(unit_nginx examples/acmdog_gate/unit_nginx_main.cpp)
+target_include_directories(unit_nginx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+set(UNIT_NG_OBJ ${CMAKE_CURRENT_BINARY_DIR}/unit_nginx.o)
+add_custom_command(
+  OUTPUT ${UNIT_NG_OBJ}
+  COMMAND xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/acmdog_gate/unit_nginx.pys
+          -o ${UNIT_NG_OBJ} -I unit_nginx
+  DEPENDS xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/acmdog_gate/unit_nginx.pys
+  COMMENT "xmexc examples/acmdog_gate/unit_nginx.pys")
+add_custom_target(unit_nginx_obj DEPENDS ${UNIT_NG_OBJ})
+
+add_dependencies(unit_nginx unit_nginx_obj)
+target_sources(unit_nginx PRIVATE ${UNIT_NG_OBJ})
+target_link_libraries(unit_nginx PRIVATE xmex_runtime)
+
+# ACMDOG 全链路集成测试的 Xmex 版本。
+add_executable(integration_full examples/acmdog_gate/integration_full_main.cpp)
+target_include_directories(integration_full PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+set(INTEGRATION_OBJ ${CMAKE_CURRENT_BINARY_DIR}/integration_full.o)
+add_custom_command(
+  OUTPUT ${INTEGRATION_OBJ}
+  COMMAND xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/acmdog_gate/integration_full.pys
+          -o ${INTEGRATION_OBJ} -I integration_full
+  DEPENDS xmexc ${CMAKE_CURRENT_SOURCE_DIR}/examples/acmdog_gate/integration_full.pys
+  COMMENT "xmexc examples/acmdog_gate/integration_full.pys")
+add_custom_target(integration_full_obj DEPENDS ${INTEGRATION_OBJ})
+
+add_dependencies(integration_full integration_full_obj)
+target_sources(integration_full PRIVATE ${INTEGRATION_OBJ})
+target_link_libraries(integration_full PRIVATE xmex_runtime)
 
 # FFI 隔离模式的 agent:独立可执行文件,加载 DLL 并处理宿主的管道请求。
 #

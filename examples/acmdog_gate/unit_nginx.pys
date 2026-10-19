@@ -1,0 +1,85 @@
+# unit_nginx.pys -- Xmex port of the nginx gate cases.
+# Original cases: nginx config syntax + docker compose config check.
+# Same linger-on-success pattern as the middleware test.
+
+NG_DIR = "/home/ubuntu/actions-runner/acmdog/ACMDOG/ACMDOG"
+NODE_SYNTAX = "ut-ng-syntax"
+NODE_CFG = "ut-ng-config"
+
+def jraw(s: str, key: str) -> str:
+    pat = "\"" + key + "\":"
+    i = s.find(pat)
+    if i < 0:
+        return ""
+    start = i + len(pat)
+    j = start
+    while j < len(s):
+        c = s[j]
+        if c == ",":
+            break
+        if c == "}":
+            break
+        if c == "]":
+            break
+        j += 1
+    v = s[start:j].strip()
+    if len(v) >= 2:
+        if v[0] == "\"":
+            if v[len(v) - 1] == "\"":
+                return v[1:len(v) - 1]
+    return v
+
+def record(name: str, ok: bool, detail: str):
+    if ok:
+        print("[PASS]", name, "|", detail)
+    else:
+        print("[FAIL]", name, "|", detail)
+
+print("=== Xmex unit test: nginx ===")
+
+total = 0
+passed = 0
+
+# nginx_config_syntax: run the syntax checker, linger only on success.
+total += 1
+cmd = "bash .github/scripts/check_nginx.sh && tail -f /dev/null"
+kv.add(NODE_SYNTAX, "/bin/bash", "[\"-c\",\"" + cmd + "\"]", NG_DIR, "")
+sleep_ms(2500)
+st = kv.status(NODE_SYNTAX)
+if jraw(st, "state") == "running":
+    passed += 1
+    record("nginx_config_syntax", True, "nginx -t ok")
+else:
+    record("nginx_config_syntax", False, st)
+
+# compose_nginx: docker compose config -q, linger only on success.
+total += 1
+cmd = "docker compose -f nginx/docker-compose.yml config -q && tail -f /dev/null"
+kv.add(NODE_CFG, "/bin/bash", "[\"-c\",\"" + cmd + "\"]", NG_DIR, "")
+sleep_ms(2500)
+st = kv.status(NODE_CFG)
+if jraw(st, "state") == "running":
+    passed += 1
+    record("compose_nginx", True, "compose config ok")
+else:
+    record("compose_nginx", False, st)
+
+total += 1
+kv.stop(NODE_SYNTAX)
+kv.stop(NODE_CFG)
+kv.erase(NODE_SYNTAX)
+kv.erase(NODE_CFG)
+kv.add("ut-ng-clean", "/usr/bin/pkill", "[\"-9\",\"-f\",\"tail -f /dev/null\"]", "/tmp", "")
+sleep_ms(1000)
+kv.erase("ut-ng-clean")
+passed += 1
+record("teardown", True, "check nodes removed")
+
+print("")
+print("=== SUMMARY ===")
+print("total=", total)
+print("passed=", passed)
+if passed == total:
+    print("result: ALL PASSED")
+else:
+    print("result: FAILED")
