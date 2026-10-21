@@ -4,37 +4,61 @@
 // 但"指向数组的指针"没问题,元素在内存里按 xmex::Value 布局排列。
 #include "xmex/runtime.h"
 
+#include "xmex/align.h"
+
 #include <cstdio>
 #include <cstdlib>  // strtod
 #include <cstring>
+#include <memory>   // unique_ptr / make_unique
 
 namespace {
 
 // 输出的目的地。同一套渲染代码要服务两个调用方:print_ 写 stdout、
 // repr 拼成一个字符串。早先它们各自实现一遍的写法在加入列表/字典之后
 // 会立刻变成两份要同步维护的递归打印代码,所以这里先抽出这个 sink。
+//
+// ⚠️ 两条路径的 IO 策略完全不同,不能混:
+//
+//   文件路径(写 stdout / 磁盘文件):
+//     早先的实现是 sinkPutc 一次 fwrite 写 **1 个字节**。渲染一个
+//     repr 可能要写上千个字符,也就是上千次 fwrite 调用 —— 每次调用
+//     都有函数调用开销和 stdio 缓冲状态维护。
+//     现在改成 xmex::BatchWriter:先在内存里拼,攒够一批才 fwrite 一次。
+//     写调用次数从 O(字符数) 降到 O(字符数 / 批大小)。
+//
+//   内存路径(repr 拼字符串):
+//     早先用 gc_alloc 每次扩容都重新分配并拷贝一遍,而旧块进了 GC
+//     的垃圾列表 —— 渲染一次 repr 会制造 O(log n) 个 GC 垃圾块。
+//     现在用 xmex::AlignedBuffer:按 2 的幂增长、对齐分配、出了作用域
+//     直接释放,完全不惊动 GC。最后 str_new 会拷贝一份,原缓冲随之消失。
 struct Sink {
-  std::FILE *f = nullptr;   // 非空则写文件
-  char *buf = nullptr;      // 非空则写内存(由 gc_alloc 分配,SCAN_NONE)
-  size_t len = 0;
-  size_t cap = 0;
+  // 内存路径的缓冲。
+  xmex::AlignedBuffer buf;
+
+  // 写文件路径的批量写器。为空则走内存路径。
+  xmex::BatchWriter *batch = nullptr;
 };
 
+// stdout 的批量写器。
+//
+// ⚠️ 必须是**复用**的,不能每次 print_ 新建一个。
+//    BatchWriter 内部有 64KB 的对齐缓冲;每次 print_ 新建就意味着
+//    每次 print_ 都要 malloc + free 64KB —— 那比省下的 fwrite 调用
+//    贵得多,实测端到端反而更慢。
+//    thread_local 是因为 print_ 可能在不同线程被调用(服务端场景),
+//    而 stdout 本身也不是线程安全的。
+xmex::BatchWriter &stdoutWriter() {
+  static thread_local xmex::BatchWriter writer(stdout);
+  return writer;
+}
+
 void sinkPut(Sink &s, const char *p, size_t n) {
-  if (s.f) {
-    std::fwrite(p, 1, n, s.f);
+  if (n == 0) return;
+  if (s.batch != nullptr) {
+    s.batch->write(p, n);
     return;
   }
-  if (s.len + n > s.cap) {
-    size_t cap = s.cap ? s.cap : 64;
-    while (cap < s.len + n) cap *= 2;
-    auto *buf = static_cast<char *>(gc_alloc(cap, xmex::kScanNone));
-    std::memcpy(buf, s.buf, s.len);
-    s.buf = buf;
-    s.cap = cap;
-  }
-  std::memcpy(s.buf + s.len, p, n);
-  s.len += n;
+  s.buf.append(p, n);
 }
 
 void sinkPuts(Sink &s, const char *str) { sinkPut(s, str, std::strlen(str)); }
@@ -42,13 +66,29 @@ void sinkPutc(Sink &s, char c) { sinkPut(s, &c, 1); }
 
 // 模仿 Python 的浮点显示:用能唯一还原该值的最短表示。
 // 直接写 %.17g 会打出 0.10000000000000001 这种噪声,%.6g 又会丢精度,
-// 所以从一个很短的精度开始试,直到字符串能精确往返为止。
+// 所以要找一个刚好能精确往返的精度。
+//
+// ⚠️ 试探的档位是 15 → 16 → 17,而不是 1 → 17。
+//    一个 double 的最短往返表示几乎总是 15~17 位有效数字:
+//      1/3      → "0.3333333333333333"  (16 位)
+//      0.1      → "0.1"                 (15 位就够)
+//      0.1+0.2  → "0.30000000000000004"(17 位)
+//    从 1 往上试要跑 15~17 次 snprintf 才命中;从 17 往下试则**永远**
+//    停在 17 位(17 位必定往返),输出全是长噪声。
+//    只试这三档,最多 3 次 snprintf,输出与 Python 的 repr 一致。
 void printDouble(Sink &s, double d) {
   char buf[64];
-  int prec = 1;
-  for (; prec <= 17; ++prec) {
-    std::snprintf(buf, sizeof(buf), "%.*g", prec, d);
-    if (std::strtod(buf, nullptr) == d) break;
+  int prec = 17;
+  for (int p : {15, 16, 17}) {
+    std::snprintf(buf, sizeof(buf), "%.*g", p, d);
+    if (std::strtod(buf, nullptr) == d) {
+      prec = p;
+      break;
+    }
+  }
+  if (prec == 17) {
+    // 三档都没命中(理论上 17 位必定往返,这里只是防御)。
+    std::snprintf(buf, sizeof(buf), "%.17g", d);
   }
   // 整数值要显示成 3.0 而不是 3,否则类型看起来像 int
   if (std::strpbrk(buf, ".eEnN") == nullptr) {
@@ -192,12 +232,15 @@ bool readLine(char *buf, size_t cap) {
 // print(a, b, c) —— 以空格分隔,末尾换行。与 Python 的 print 一致。
 extern "C" void print_(xmex::Value *vals, int64_t n) {
   Sink s;
-  s.f = stdout;
+  s.batch = &stdoutWriter();
   for (int64_t i = 0; i < n; ++i) {
     if (i) sinkPutc(s, ' ');
     writeStr(s, vals[i]);
   }
   sinkPutc(s, '\n');
+  // 落盘:整条 print 只产生一次 fwrite,而不是每个字符一次。
+  // 批量写器是复用的,这里 flush 的只是它内部那块 64KB 缓冲的内容。
+  s.batch->flush();
 }
 
 // 按 repr 规则渲染成新字符串。字典查不到键时的报错信息要用它,
@@ -205,7 +248,9 @@ extern "C" void print_(xmex::Value *vals, int64_t n) {
 extern "C" xmex::Value repr(const xmex::Value *v) {
   Sink s;
   writeRepr(s, *v);
-  return str_new(s.buf, static_cast<int64_t>(s.len));
+  // s.buf 是对齐的堆内存,str_new 会拷走一份;拷完这块内存随 Sink 析构释放,
+  // 不进 GC —— 渲染一次 repr 不再制造 GC 垃圾块。
+  return str_new(s.buf.data(), static_cast<int64_t>(s.buf.size()));
 }
 
 // ---------------------------------------------------------------------------

@@ -24,7 +24,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <cmath>
-#include <memory>
+#include "xmex/smartptr.h"
 #include <string>
 #include <vector>
 #include <map>
@@ -39,7 +39,7 @@ namespace {
 
 // 一个极小的 JSON 值。够用即可：算子图里只有对象/数组/字符串/数字/布尔。
 struct JsonValue;
-using JsonPtr = std::shared_ptr<JsonValue>;
+using JsonPtr = xmex::SharedPtr<JsonValue>;
 
 struct JsonValue {
   enum Kind { kNull, kBool, kNumber, kString, kArray, kObject };
@@ -121,7 +121,7 @@ class JsonParser {
     if (static_cast<size_t>(end_ - p_) < len) return nullptr;
     if (std::strncmp(p_, word, len) != 0) return nullptr;
     p_ += len;
-    auto v = std::make_shared<JsonValue>();
+    auto v = xmex::makeShared<JsonValue>();
     v->kind = kind;
     v->boolean = b;
     return v;
@@ -143,7 +143,7 @@ class JsonParser {
       }
     }
     if (!any) return nullptr;
-    auto v = std::make_shared<JsonValue>();
+    auto v = xmex::makeShared<JsonValue>();
     v->kind = JsonValue::kNumber;
     v->number = std::strtod(std::string(start, p_).c_str(), nullptr);
     return v;
@@ -152,7 +152,7 @@ class JsonParser {
   JsonPtr parseString() {
     if (p_ >= end_ || *p_ != '"') return nullptr;
     ++p_;
-    auto v = std::make_shared<JsonValue>();
+    auto v = xmex::makeShared<JsonValue>();
     v->kind = JsonValue::kString;
     std::string &out = v->str;
     while (p_ < end_) {
@@ -205,7 +205,7 @@ class JsonParser {
 
   JsonPtr parseArray() {
     ++p_;  // '['
-    auto v = std::make_shared<JsonValue>();
+    auto v = xmex::makeShared<JsonValue>();
     v->kind = JsonValue::kArray;
     skipWs();
     if (consume(']')) return v;
@@ -222,7 +222,7 @@ class JsonParser {
 
   JsonPtr parseObject() {
     ++p_;  // '{'
-    auto v = std::make_shared<JsonValue>();
+    auto v = xmex::makeShared<JsonValue>();
     v->kind = JsonValue::kObject;
     skipWs();
     if (consume('}')) return v;
@@ -585,7 +585,7 @@ JsonPtr ensureParamObject(Node &n) {
   JsonParser p(n.params.data(), n.params.data() + n.params.size());
   JsonPtr obj = p.parse();
   if (!obj || obj->kind != JsonValue::kObject) {
-    obj = std::make_shared<JsonValue>();
+    obj = xmex::makeShared<JsonValue>();
     obj->kind = JsonValue::kObject;
   }
   return obj;
@@ -597,14 +597,14 @@ void setParamString(Node &n, const std::string &key, const std::string &value) {
   bool replaced = false;
   for (auto &kv : obj->object) {
     if (kv.first == key) {
-      kv.second = std::make_shared<JsonValue>();
+      kv.second = xmex::makeShared<JsonValue>();
       kv.second->kind = JsonValue::kString;
       kv.second->str = value;
       replaced = true;
     }
   }
   if (!replaced) {
-    auto v = std::make_shared<JsonValue>();
+    auto v = xmex::makeShared<JsonValue>();
     v->kind = JsonValue::kString;
     v->str = value;
     obj->object.emplace_back(key, v);
@@ -622,14 +622,14 @@ void setParamNumber(Node &n, const std::string &key, double value) {
   bool replaced = false;
   for (auto &kv : obj->object) {
     if (kv.first == key) {
-      kv.second = std::make_shared<JsonValue>();
+      kv.second = xmex::makeShared<JsonValue>();
       kv.second->kind = JsonValue::kNumber;
       kv.second->number = value;
       replaced = true;
     }
   }
   if (!replaced) {
-    auto v = std::make_shared<JsonValue>();
+    auto v = xmex::makeShared<JsonValue>();
     v->kind = JsonValue::kNumber;
     v->number = value;
     obj->object.emplace_back(key, v);

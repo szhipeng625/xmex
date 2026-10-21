@@ -9,6 +9,8 @@
 //   3. 与推理引擎集成：直接输出 token ID 供模型使用
 #include "xmex/runtime.h"
 
+#include "xmex/align.h"
+
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -87,26 +89,25 @@ extern "C" xmex::Value tokenizer_load(const xmex::Value *path) {
 
   const char *p = str_data(path);
 
-  // 读取文件
-  FILE *fp = fopen(p, "r");
-  if (!fp) runtime_error("无法打开 tokenizer 文件");
-
-  fseek(fp, 0, SEEK_END);
-  long fsize = ftell(fp);
-  fseek(fp, 0, SEEK_SET);
-
-  // 只读取前 2MB 用于解析 vocab（完整文件 11MB，大部分是 vocab 数据）
-  size_t readSize = static_cast<size_t>(fsize) < 2 * 1024 * 1024
-                        ? static_cast<size_t>(fsize)
-                        : 2 * 1024 * 1024;
-  char *json = static_cast<char *>(malloc(readSize + 1));
-  if (!json) { fclose(fp); runtime_error("内存不足"); }
-  fread(json, 1, readSize, fp);
-  json[readSize] = '\0';
-  fclose(fp);
+  // 读取文件。
+  //
+  // 用 xmex::readFilePrefix 取代手写的 fopen/fseek/fread:
+  //   1. 缓冲首地址按 64 字节对齐 —— 后面在这个缓冲里做 strstr 扫描
+  //      找 "added_tokens" / "vocab" 时,不会因为跨缓存行而慢;
+  //   2. 内部给 stdio 挂了 64KB 缓冲,读系统调用次数大幅减少;
+  //   3. 顺带修掉了原来的一个 bug:早先用的是 fopen(p, "r") —— 文本模式。
+  //      Windows 上文本模式会把 \n 翻译成 \r\n,JSON 里的字符串字面量
+  //      会被改写,导致某些 tokenizer 的 content 解析出错。
+  //      这里用二进制模式,跨平台行为一致。
+  //
+  // 只读取前 2MB 用于解析 vocab(完整文件 11MB,大部分是 vocab 数据)
+  constexpr size_t kMaxRead = 2 * 1024 * 1024;
+  xmex::AlignedBuffer json = xmex::readFilePrefix(p, kMaxRead);
+  if (!json) runtime_error("无法打开 tokenizer 文件");
+  if (json.empty()) runtime_error("tokenizer 文件为空");
 
   // 解析 added_tokens
-  const char *addedStart = strstr(json, "\"added_tokens\":[");
+  const char *addedStart = strstr(json.data(), "\"added_tokens\":[");
   if (addedStart) {
     const char *p2 = addedStart + 16;
     while (*p2) {
@@ -157,7 +158,7 @@ extern "C" xmex::Value tokenizer_load(const xmex::Value *path) {
   }
 
   // 解析 vocab（model.vocab 部分）
-  const char *vocabStart = strstr(json, "\"vocab\":{");
+  const char *vocabStart = strstr(json.data(), "\"vocab\":{");
   if (vocabStart) {
     vocabStart += 8;  // 跳过 "vocab":
     const char *p2 = vocabStart;
@@ -212,7 +213,6 @@ extern "C" xmex::Value tokenizer_load(const xmex::Value *path) {
   g_tokenizer.vocabSize = static_cast<int>(g_tokenizer.idToToken.size());
   g_tokenizer.loaded = true;
 
-  free(json);
 
   char buf[512];
   snprintf(buf, sizeof(buf),

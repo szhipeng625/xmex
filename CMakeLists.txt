@@ -196,6 +196,19 @@ target_link_libraries(runtime_test PRIVATE xmex_runtime)
 add_executable(gc_test tests/gc_test.cpp)
 target_link_libraries(gc_test PRIVATE xmex_runtime)
 
+# 自研智能指针测试(2026-10 增补)。
+#
+# 刻意**不**链 xmex_runtime —— 智能指针是纯头文件设施,链上运行时
+# 只会把"是智能指针的问题"和"是运行时的问题"混在一起。
+add_executable(smartptr_test tests/smartptr_test.cpp)
+target_include_directories(smartptr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+# 内存对齐模型测试(2026-10 增补)。
+#
+# 同样只依赖头文件,覆盖各级对齐保证、缓冲池复用、批量写与原写法等价。
+add_executable(align_test tests/align_test.cpp)
+target_include_directories(align_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
 # 调谐循环与副本组测试(2026-10 增补)。
 #
 # 刻意**不**链 xmex_runtime,而是直接编 kv_admin.cpp:这个测试走
@@ -495,6 +508,8 @@ add_test(NAME jit_spike COMMAND jit_spike $<TARGET_FILE:xmex_runtime>)
 add_test(NAME frontend_test COMMAND frontend_test)
 add_test(NAME runtime_test COMMAND runtime_test)
 add_test(NAME gc_test COMMAND gc_test)
+add_test(NAME smartptr_test COMMAND smartptr_test)
+add_test(NAME align_test COMMAND align_test)
 
 # examples/ 下的每个示例都必须能被成功解析(退出码 0)。
 # 这是最轻量的检查:源码进、AST 出,覆盖前端全链路。

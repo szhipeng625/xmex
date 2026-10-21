@@ -24,14 +24,14 @@
 #include <cmath>
 #include <sstream>
 #include <algorithm>
-#include <memory>
+#include "xmex/smartptr.h"
 
 namespace {
 
 // ---- 最小 JSON 值解析(只支持描述符需要的形态) ----
 
 struct JsonValue;
-using JsonPtr = std::shared_ptr<JsonValue>;
+using JsonPtr = xmex::SharedPtr<JsonValue>;
 
 struct JsonValue {
     enum Kind { kNull, kBool, kNumber, kString, kArray, kObject } kind = kNull;
@@ -76,26 +76,26 @@ private:
         if (c == '{') return parse_object();
         if (c == '[') return parse_array();
         if (c == '"') {
-            auto v = std::make_shared<JsonValue>();
+            auto v = xmex::makeShared<JsonValue>();
             v->kind = JsonValue::kString;
             v->str = parse_string();
             return v;
         }
         if (s_.compare(p_, 4, "true") == 0) {
             p_ += 4;
-            auto v = std::make_shared<JsonValue>();
+            auto v = xmex::makeShared<JsonValue>();
             v->kind = JsonValue::kBool; v->b = true;
             return v;
         }
         if (s_.compare(p_, 5, "false") == 0) {
             p_ += 5;
-            auto v = std::make_shared<JsonValue>();
+            auto v = xmex::makeShared<JsonValue>();
             v->kind = JsonValue::kBool; v->b = false;
             return v;
         }
         if (s_.compare(p_, 4, "null") == 0) {
             p_ += 4;
-            return std::make_shared<JsonValue>();
+            return xmex::makeShared<JsonValue>();
         }
         return parse_number();
     }
@@ -107,7 +107,7 @@ private:
                                   s_[p_] == 'E')) {
             ++p_;
         }
-        auto v = std::make_shared<JsonValue>();
+        auto v = xmex::makeShared<JsonValue>();
         v->kind = JsonValue::kNumber;
         v->num = atof(s_.substr(start, p_ - start).c_str());
         return v;
@@ -159,7 +159,7 @@ private:
     }
 
     JsonPtr parse_array() {
-        auto v = std::make_shared<JsonValue>();
+        auto v = xmex::makeShared<JsonValue>();
         v->kind = JsonValue::kArray;
         eat('[');
         skip_ws();
@@ -176,7 +176,7 @@ private:
     }
 
     JsonPtr parse_object() {
-        auto v = std::make_shared<JsonValue>();
+        auto v = xmex::makeShared<JsonValue>();
         v->kind = JsonValue::kObject;
         eat('{');
         skip_ws();

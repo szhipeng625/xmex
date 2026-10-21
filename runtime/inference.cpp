@@ -14,6 +14,8 @@
 //   - GPU 加速：关键算子通过 CUDA 内核执行
 #include "xmex/runtime.h"
 
+#include "xmex/align.h"
+
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -94,12 +96,24 @@ static struct {
   int vocabSize = 0;
 
   // 权重数据（保持 4-bit 量化，按需反量化）
-  uint8_t *weightData = nullptr;
+  //
+  // 用 xmex::AlignedBuffer 而不是裸 malloc:
+  //   - 释放路径统一(不再需要在别处记着"这块是 malloc 来的")；
+  //   - 权重区按 64 字节对齐 —— 反量化时按 float/float4 批量读,
+  //     未对齐的起始地址会让每次向量载入都跨缓存行;
+  //   - 缓冲区是独占的,不参与 GC 扫描,GC 也不用给它记账。
+  xmex::AlignedBuffer weightData;
   size_t weightDataSize = 0;
 
   // KV Cache（每层一个 K 和 V）
-  float **kCache = nullptr;
-  float **vCache = nullptr;
+  //
+  // 每层的缓存单独一块 64 字节对齐的内存:
+  //   - attention 要顺序扫过整块缓存,起始地址对齐能让首尾两个
+  //     向量载入都不跨缓存行;
+  //   - 每层独立分配,不同层的缓存不会因为恰好挨在一起而共享
+  //     缓存行(伪共享会让多线程推理的吞吐掉一半)。
+  std::vector<xmex::AlignedBuffer> kCache;
+  std::vector<xmex::AlignedBuffer> vCache;
   int maxSeqLen = 4096;
   int currentSeqLen = 0;
 
@@ -127,16 +141,13 @@ extern "C" xmex::Value inference_load_model(const xmex::Value *modelPath,
   const char *cp = str_data(configPath);
 
   // 读取配置文件
-  FILE *cf = fopen(cp, "r");
-  if (!cf) runtime_error("无法打开配置文件");
-  fseek(cf, 0, SEEK_END);
-  long cSize = ftell(cf);
-  fseek(cf, 0, SEEK_SET);
-  char *configJson = static_cast<char *>(malloc(static_cast<size_t>(cSize) + 1));
-  if (!configJson) { fclose(cf); runtime_error("内存不足"); }
-  fread(configJson, 1, static_cast<size_t>(cSize), cf);
-  configJson[cSize] = '\0';
-  fclose(cf);
+  //
+  // 用 xmex::readFileAligned:对齐缓冲 + 64KB stdio 缓冲。
+  // 顺带修掉一个老问题:原来用的是 fopen(cp, "r") —— 文本模式,
+  // Windows 上会把 \n 翻译成 \r\n。现在统一走二进制模式。
+  xmex::AlignedBuffer configBuf = xmex::readFileAligned(cp);
+  if (!configBuf) runtime_error("无法打开配置文件");
+  const char *configJson = configBuf.data();
 
   // 解析关键参数
   g_infer.hiddenSize = static_cast<int>(jsonGetInt(configJson, "hidden_size"));
@@ -147,11 +158,17 @@ extern "C" xmex::Value inference_load_model(const xmex::Value *modelPath,
   g_infer.vocabSize = static_cast<int>(jsonGetInt(configJson, "vocab_size"));
   g_infer.headDim = g_infer.hiddenSize / g_infer.numHeads;
 
-  free(configJson);
-
   // 读取 safetensors 文件
-  FILE *mf = fopen(mp, "r");
+  //
+  // ⚠️ 必须用二进制模式("rb"):safetensors 的数据区是原始字节,
+  //    文本模式下的 \n -> \r\n 转换会把权重全弄坏。
+  FILE *mf = fopen(mp, "rb");
   if (!mf) runtime_error("无法打开模型文件");
+
+  // 给 stdio 一块大缓冲:权重文件动辄几百 MB,默认 4KB 缓冲会让
+  // read 系统调用多出两个数量级。
+  std::vector<char> iobuf(xmex::kDefaultBatchSize);
+  setvbuf(mf, iobuf.data(), _IOFBF, iobuf.size());
 
   // 读取 8 字节头长度
   uint8_t headerLenBuf[8];
@@ -162,10 +179,16 @@ extern "C" xmex::Value inference_load_model(const xmex::Value *modelPath,
   uint64_t headerLen = readU64LE(headerLenBuf);
 
   // 读取 JSON 头
-  char *headerJson = static_cast<char *>(malloc(static_cast<size_t>(headerLen) + 1));
-  if (!headerJson) { fclose(mf); runtime_error("内存不足"); }
-  fread(headerJson, 1, static_cast<size_t>(headerLen), mf);
-  headerJson[headerLen] = '\0';
+  xmex::AlignedBuffer headerBuf;
+  headerBuf.reserve(static_cast<std::size_t>(headerLen) + 1, xmex::kDefaultAlign);
+  if (!headerBuf) { fclose(mf); runtime_error("内存不足"); }
+  if (fread(headerBuf.data(), 1, static_cast<std::size_t>(headerLen), mf) !=
+      static_cast<std::size_t>(headerLen)) {
+    fclose(mf);
+    runtime_error("无效的 safetensors 文件");
+  }
+  headerBuf.resize(static_cast<std::size_t>(headerLen));
+  headerBuf.data()[headerLen] = '\0';
 
   // 获取数据区大小
   fseek(mf, 0, SEEK_END);
@@ -173,26 +196,33 @@ extern "C" xmex::Value inference_load_model(const xmex::Value *modelPath,
   long dataOffset = 8 + static_cast<long>(headerLen);
   g_infer.weightDataSize = static_cast<size_t>(fileSize - dataOffset);
 
-  // 读取权重数据
-  g_infer.weightData = static_cast<uint8_t *>(malloc(g_infer.weightDataSize));
-  if (!g_infer.weightData) { free(headerJson); fclose(mf); runtime_error("内存不足"); }
+  // 读取权重数据 —— 对齐分配,64 字节边界
+  g_infer.weightData.reserve(g_infer.weightDataSize, xmex::kDefaultAlign);
+  if (!g_infer.weightData) { fclose(mf); runtime_error("内存不足"); }
   fseek(mf, dataOffset, SEEK_SET);
-  fread(g_infer.weightData, 1, g_infer.weightDataSize, mf);
+  if (fread(g_infer.weightData.data(), 1, g_infer.weightDataSize, mf) !=
+      g_infer.weightDataSize) {
+    fclose(mf);
+    runtime_error("读取权重数据失败");
+  }
+  g_infer.weightData.resize(g_infer.weightDataSize);
   fclose(mf);
-  free(headerJson);
 
   // 分配 KV Cache
+  //
+  // 每层两块独立的 64 字节对齐内存。层与层之间不共享缓存行 ——
+  // 推理时若多层并发写入,共享缓存行会造成伪共享。
   int kvDim = g_infer.headDim * g_infer.numKVHeads;
-  g_infer.kCache = static_cast<float **>(malloc(
-      static_cast<size_t>(g_infer.numLayers) * sizeof(float *)));
-  g_infer.vCache = static_cast<float **>(malloc(
-      static_cast<size_t>(g_infer.numLayers) * sizeof(float *)));
+  const std::size_t cacheSize = static_cast<std::size_t>(g_infer.maxSeqLen) *
+                                static_cast<std::size_t>(kvDim) * sizeof(float);
 
+  g_infer.kCache.clear();
+  g_infer.vCache.clear();
+  g_infer.kCache.resize(g_infer.numLayers);
+  g_infer.vCache.resize(g_infer.numLayers);
   for (int i = 0; i < g_infer.numLayers; ++i) {
-    size_t cacheSize = static_cast<size_t>(g_infer.maxSeqLen) *
-                       static_cast<size_t>(kvDim) * sizeof(float);
-    g_infer.kCache[i] = static_cast<float *>(malloc(cacheSize));
-    g_infer.vCache[i] = static_cast<float *>(malloc(cacheSize));
+    g_infer.kCache[i].reserve(cacheSize, xmex::kDefaultAlign);
+    g_infer.vCache[i].reserve(cacheSize, xmex::kDefaultAlign);
     if (!g_infer.kCache[i] || !g_infer.vCache[i]) {
       runtime_error("KV Cache 内存分配失败");
     }
@@ -578,21 +608,12 @@ extern "C" xmex::Value inference_profile() {
 // inference_unload() -> None
 // 卸载模型，释放所有资源。
 extern "C" void inference_unload() {
-  if (g_infer.weightData) {
-    free(g_infer.weightData);
-    g_infer.weightData = nullptr;
-  }
-
-  if (g_infer.kCache) {
-    for (int i = 0; i < g_infer.numLayers; ++i) {
-      free(g_infer.kCache[i]);
-      free(g_infer.vCache[i]);
-    }
-    free(g_infer.kCache);
-    free(g_infer.vCache);
-    g_infer.kCache = nullptr;
-    g_infer.vCache = nullptr;
-  }
+  // AlignedBuffer 是 RAII 的:清空容器就是释放,不需要逐块 free,
+  // 也不可能出现"某块忘了 free"或"free 了两遍"。
+  g_infer.weightData.release();
+  g_infer.weightDataSize = 0;
+  g_infer.kCache.clear();
+  g_infer.vCache.clear();
 
   g_infer.loaded = false;
   g_infer.currentSeqLen = 0;
