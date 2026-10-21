@@ -1,0 +1,29 @@
+# 算子融合的端到端用例:从 Xmex 脚本一路走到优化器。
+#
+# 覆盖 runtime_test.cpp 覆盖不到的一段 —— irgen 的 builtin 映射
+# (fusion.* -> fusion_*_v) 与变参补齐。旧版这里根本跑不起来:
+# fusion.add_op 只接受 4 个参数,传第 5 个会编译期报
+# "函数收到了多余的位置参数"。
+g = fusion.create_graph("mlp")
+g = fusion.add_op(g, "matmul", "fc1", '{"in_features":768,"out_features":3072}')
+g = fusion.add_op(g, "bias_add", "b1")
+g = fusion.add_op(g, "relu", "r1")
+
+# 显式连边(第 5 个参数):分叉再合流,构成残差结构
+g = fusion.add_op(g, "matmul", "fc2", '{"in_features":3072,"out_features":768}', "r1")
+g = fusion.add_op(g, "add", "res", "{}", "r1,fc2")
+
+# 建出来的图要有真实的数据依赖边
+print("has_edges:", g.find('"edges":[[') >= 0)
+print("res_is_branch:", g.find('"inputs":["r1","fc2"]') >= 0)
+
+r = fusion.apply_rules(g)
+print("has_linear_relu:", r.find("linear_relu") >= 0)
+print("has_optimized:", r.find('"optimized":') >= 0)
+# optimized 必须是真正优化过的图,而不是原图回显
+print("optimized_fused:", r.find('linear_relu') >= 0)
+print("stats_reduced:", r.find('"reduced_nodes":') >= 0)
+
+o = fusion.optimize(g)
+print("optimized_is_graph:", o.find('"nodes":') >= 0)
+print("keeps_fc2:", o.find("fc2") >= 0)

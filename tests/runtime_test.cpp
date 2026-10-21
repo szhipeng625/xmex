@@ -9,6 +9,7 @@
 #include "xmex/runtime.h"
 
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -344,6 +345,235 @@ int main() {
     checkInt(truthy(dict_new(nullptr, nullptr, 0)), 0, "bool({}) 是假");
     checkInt(truthy(tuple_new(nullptr, 0)), 0, "bool(()) 是假");
     checkInt(truthy(list({int_(0)})), 1, "bool([0]) 是真(非空即可)");
+  }
+
+  // ------------------------------------------------------------ 算子融合
+  //
+  // 这些用例钉死的是「优化器在真实数据依赖上的行为」。旧版 fusion 的
+  // 匹配是 strstr 扫 JSON 文本 —— 只要图里出现过这些算子名就算命中，
+  // 与连边无关，所以下面凡是关于「不该融合」的用例，旧实现都会失败。
+  std::printf("\n-- 算子融合: 图 IR 与数据流融合 --\n");
+  {
+    // 把一个 (const xmex::Value*) -> Value 的运行时函数包一层,便于断言文本结果。
+    auto wrap = [](auto fn) {
+      return [fn](const std::string &s, std::initializer_list<xmex::Value> extra = {}) {
+        std::vector<xmex::Value> args;
+        args.push_back(str_new(s.c_str(), static_cast<int64_t>(s.size())));
+        for (const auto &e : extra) args.push_back(e);
+        xmex::Value r = fn(args.data());
+        return std::string(str_data(&r), static_cast<size_t>(str_size(&r)));
+      };
+    };
+    auto fusionApply = wrap([](xmex::Value *a) { return fusion_apply_rules(a); });
+    auto fusionOpt = wrap([](xmex::Value *a) { return fusion_optimize(a, nullptr); });
+    auto fusionSetOutputs = [](const std::string &g, const std::string &outs) {
+      xmex::Value gv = str_new(g.c_str(), static_cast<int64_t>(g.size()));
+      xmex::Value ov = str_new(outs.c_str(), static_cast<int64_t>(outs.size()));
+      xmex::Value r = fusion_set_outputs(&gv, &ov);
+      return std::string(str_data(&r), static_cast<size_t>(str_size(&r)));
+    };
+    auto fusionCreate = [](const std::string &n) {
+      xmex::Value v = str_new(n.c_str(), static_cast<int64_t>(n.size()));
+      xmex::Value r = fusion_create_graph(&v);
+      return std::string(str_data(&r), static_cast<size_t>(str_size(&r)));
+    };
+    auto fusionAdd = [](const std::string &g, const std::string &t,
+                        const std::string &n, const std::string &p = "{}") {
+      xmex::Value gv = str_new(g.c_str(), static_cast<int64_t>(g.size()));
+      xmex::Value tv = str_new(t.c_str(), static_cast<int64_t>(t.size()));
+      xmex::Value nv = str_new(n.c_str(), static_cast<int64_t>(n.size()));
+      xmex::Value pv = str_new(p.c_str(), static_cast<int64_t>(p.size()));
+      xmex::Value r = fusion_add_op(&gv, &tv, &nv, &pv);
+      return std::string(str_data(&r), static_cast<size_t>(str_size(&r)));
+    };
+    auto fusionAddIn = [](const std::string &g, const std::string &t,
+                          const std::string &n, const std::string &ins,
+                          const std::string &p = "{}") {
+      xmex::Value gv = str_new(g.c_str(), static_cast<int64_t>(g.size()));
+      xmex::Value tv = str_new(t.c_str(), static_cast<int64_t>(t.size()));
+      xmex::Value nv = str_new(n.c_str(), static_cast<int64_t>(n.size()));
+      xmex::Value pv = str_new(p.c_str(), static_cast<int64_t>(p.size()));
+      xmex::Value iv = str_new(ins.c_str(), static_cast<int64_t>(ins.size()));
+      xmex::Value r = fusion_add_op_v(&gv, &tv, &nv, &pv, &iv);
+      return std::string(str_data(&r), static_cast<size_t>(str_size(&r)));
+    };
+
+    // --- 建图与连边 ---
+    std::string g = fusionCreate("mlp");
+    check(g.find("\"mlp\"") != std::string::npos, "create_graph 保留图名");
+    check(g.find("\"nodes\":[]") != std::string::npos, "create_graph 产出空节点表");
+
+    // 四参形式:旧语义,串成链
+    std::string chain = fusionAdd(g, "matmul", "fc1", "{\"in_features\":768,\"out_features\":3072}");
+    chain = fusionAdd(chain, "bias_add", "b1");
+    chain = fusionAdd(chain, "relu", "r1");
+    check(chain.find("\"inputs\":[\"fc1\"]") != std::string::npos,
+          "四参 add_op 自动接到上一个节点(向后兼容的串链)");
+    check(chain.find("\"edges\":[[\"fc1\",\"b1\"],[\"b1\",\"r1\"]]") != std::string::npos,
+          "edges 记录真实的数据依赖边");
+    check(chain.find("\"outputs\":[\"r1\"]") != std::string::npos,
+          "末端节点被标为图输出");
+
+    // 显式 inputs:支持分叉
+    std::string b = fusionAdd(chain, "matmul", "fc2", "{\"in_features\":3072,\"out_features\":768}");
+    b = fusionAddIn(b, "add", "res", "r1,fc2");
+    check(b.find("\"inputs\":[\"r1\",\"fc2\"]") != std::string::npos,
+          "显式 inputs 支持多上游(合流)");
+    check(b.find("\"edges\":[[\"fc1\",\"b1\"],[\"b1\",\"r1\"],[\"r1\",\"fc2\"],"
+                   "[\"r1\",\"res\"],[\"fc2\",\"res\"]]") != std::string::npos,
+          "分叉与合流的边都记下来了(res 有 r1 和 fc2 两条入边)");
+
+    // --- 链式融合 ---
+    std::string rep = fusionApply(chain);
+    check(rep.find("\"fused_op\":\"linear_relu\"") != std::string::npos,
+          "matmul->bias_add->relu 一路融成 linear_relu");
+    // 关键:optimized 必须真的是优化后的图,而不是原图回显(旧版的 bug)
+    size_t optStart = rep.find("\"optimized\":");
+    std::string opt = (optStart == std::string::npos) ? "" : rep.substr(optStart);
+    check(opt.find("linear_relu") != std::string::npos, "optimized 里确实是融合后的算子");
+    check(opt.find("\"type\":\"matmul\"") == std::string::npos,
+          "optimized 里原来的 matmul/bias/relu 已被吸收");
+    check(rep.find("\"reduced_nodes\":2") != std::string::npos,
+          "3 个节点融成 1 个,节点数减少 2");
+
+    // --- 关键的反例: 类型存在但无边,不该融合 ---
+    // 两个互不相连的分支,各自都含 relu,但没有 relu 跟在 matmul 后面
+    std::string sep = fusionCreate("disjoint");
+    sep = fusionAddIn(sep, "matmul", "m1", "x");
+    sep = fusionAddIn(sep, "matmul", "m2", "y");
+    sep = fusionAddIn(sep, "relu", "r_a", "m1");
+    sep = fusionAddIn(sep, "add", "add_b", "m2,w");
+    std::string sepRep = fusionApply(sep);
+    // m1->r_a 是真实边,会融;add_b 的上游是 m2 和 w,w 不是图内节点,故不融 m2
+    // 但关键是 m2 不能被 add_b 之外的路径误融
+    check(sepRep.find("\"linear_relu\"") == std::string::npos ||
+              sepRep.find("\"nodes\":[\"m1\",\"r_a\"]") != std::string::npos,
+          "只沿真实边融合,不做全图文本匹配");
+
+    // matmul 之后接 reshape:shape 是布局变换,禁止跨越融合
+    std::string sh = fusionCreate("shape");
+    sh = fusionAddIn(sh, "matmul", "m", "x");
+    sh = fusionAddIn(sh, "reshape", "rs", "m");
+    sh = fusionAddIn(sh, "relu", "r", "rs");
+    std::string shRep = fusionApply(sh);
+    check(shRep.find("\"fusions_applied\":[]") != std::string::npos,
+          "reshape 是融合屏障,不跨越它融合(matmul->reshape->relu 不融)");
+
+    // --- CSE:完全相同的逐元素节点只留一个 ---
+    std::string cse = fusionCreate("cse");
+    cse = fusionAddIn(cse, "matmul", "m", "x");
+    cse = fusionAddIn(cse, "relu", "r1", "m");
+    cse = fusionAddIn(cse, "mul", "d1", "m,s");
+    cse = fusionAddIn(cse, "mul", "d2", "m,s");
+    cse = fusionAddIn(cse, "add", "out", "d1,d2");
+    std::string cseRep = fusionApply(cse);
+    // d1/d2 指纹相同(mul + 相同 params + 相同 inputs),应被合并成一个。
+    // 保留下来的是哪一个取决于拓扑序,不固定,所以只断言「mul 节点只剩一个」。
+    std::string cseOpt = cseRep.substr(cseRep.find("\"optimized\":"));
+    // d1/d2 指纹相同(mul + 相同 params + 相同 inputs),应被合并,随后
+    // 融合体再把 add 吸进来 —— 最终只剩一个融合节点,不再有裸 mul。
+    check(cseOpt.find("\"type\":\"mul\"") == std::string::npos,
+          "CSE 把两个相同的 mul 消掉(后续融合又把 add 吸了进去)");
+    check(cseOpt.find("\"fused_from\"") != std::string::npos,
+          "融合节点记录了被吸收的血缘");
+    check(cseOpt.find("\"inputs\":[\"m\",\"s\"]") != std::string::npos,
+          "融合节点保留了原节点的输入边");
+    // 去重后的边不能重复 —— 曾经出现 ["d2","out"] 被写两遍
+    check(cseOpt.find("[\"d2\",\"out\"],[\"d2\",\"out\"]") == std::string::npos,
+          "CSE 改道后不产生重复边");
+
+    // --- 死节点消除 ---
+    // ⚠️ 悬空节点必须在**主链末端之后**添加才是"死"的。若它是最后添加的
+    // 节点,它就是当前图的末端(根),删掉反而会丢掉整条链。
+    std::string dead = fusionCreate("dead");
+    dead = fusionAddIn(dead, "matmul", "live", "x");
+    dead = fusionAddIn(dead, "relu", "live_out", "live");
+    dead = fusionAddIn(dead, "matmul", "orphan", "y");  // 另起一枝,无下游
+    std::string deadOpt = fusionOpt(dead);
+    // orphan 无下游 → 除了它自己没人消费,是悬空的
+    check(deadOpt.find("orphan") != std::string::npos,
+          "作为末端添加的节点是图根,不会被当死节点删掉");
+    check(deadOpt.find("live_out") != std::string::npos, "活的节点保留");
+
+    // 真正的死节点:显式声明 outputs 后,不可达的分支才被删掉。
+    // 这是消除悬空分支的可靠方式 —— 光看「无消费者」分不清末端与垃圾。
+    std::string dead3 = fusionCreate("dead3");
+    dead3 = fusionAddIn(dead3, "matmul", "a", "x");
+    dead3 = fusionAddIn(dead3, "relu", "a_out", "a");
+    dead3 = fusionAddIn(dead3, "mul", "dangling", "y,z");
+    dead3 = fusionSetOutputs(dead3, "a_out");
+    std::string dead3Opt = fusionOpt(dead3);
+    check(dead3Opt.find("dangling") == std::string::npos,
+          "显式声明 outputs 后,不可达的死节点被消除");
+    check(dead3Opt.find("a_out") != std::string::npos, "显式声明的输出保留");
+
+    // --- Pass 开关 ---
+    {
+      std::string cg = fusionCreate("chainpass");
+      cg = fusionAddIn(cg, "matmul", "m", "x");
+      cg = fusionAddIn(cg, "relu", "r", "m");
+      // 关掉链式融合后应保持 matmul + relu 两个节点
+      xmex::Value gv = str_new(cg.c_str(), static_cast<int64_t>(cg.size()));
+      const char *chainOff = "{\"chain\":false}";
+      xmex::Value ov = str_new(chainOff, static_cast<int64_t>(std::strlen(chainOff)));
+      xmex::Value r = fusion_optimize_v(&gv, &ov);
+      std::string noChain(str_data(&r), static_cast<size_t>(str_size(&r)));
+      check(noChain.find("\"type\":\"relu\"") != std::string::npos,
+            "chain=false 时不做融合,relu 保持独立节点");
+      check(noChain.find("linear_relu") == std::string::npos,
+            "chain=false 时不产生融合算子");
+
+      // 默认（全开）则应融合
+      std::string allChain = fusionOpt(cg);
+      check(allChain.find("linear_relu") != std::string::npos,
+            "默认开启 chain 融合");
+    }
+
+    // --- QKV 合并 ---
+    std::string qkv = fusionCreate("attn");
+    const char *qp = "{\"in_features\":768,\"out_features\":768}";
+    qkv = fusionAddIn(qkv, "matmul", "wq", "h", qp);
+    qkv = fusionAddIn(qkv, "matmul", "wk", "h", qp);
+    qkv = fusionAddIn(qkv, "matmul", "wv", "h", qp);
+    qkv = fusionAddIn(qkv, "softmax", "sm", "wq");
+    std::string qkvRep = fusionApply(qkv);
+    check(qkvRep.find("\"fused_op\":\"qkv_projection\"") != std::string::npos,
+          "同输入同形状的三个 matmul 合并成 qkv_projection");
+    std::string qkvOpt = qkvRep.substr(qkvRep.find("\"optimized\":"));
+    check(qkvOpt.find("\"out_features\":2304") != std::string::npos,
+          "QKV 合并后 out_features = 3×768 = 2304");
+    // out_features 必须是**数字**而不是字符串 —— 下游要拿它当 GEMM 的 N 维,
+    // 写成 "2304" 会在生成内核时悄悄取到 0。
+    check(qkvOpt.find("\"out_features\":\"2304\"") == std::string::npos,
+          "out_features 保持数字类型(不是字符串)");
+    // 被吸收的 wk/wv 不能还留在显式输出名单里
+    check(qkvOpt.find("\"explicit_outputs\":[\"wk\"") == std::string::npos,
+          "QKV 合并后不残留已删节点的显式输出");
+
+    // --- 环检测 ---
+    // ⚠️ runtime_error 是 exit(1) 而不是抛异常,所以「环图被拒绝」没法写成
+    // try/catch 断言。环检测本身由 E2E 用例 fusion_cycle.pys 覆盖(跑子进程
+    // 查退出码),这里只断言正常路径没被环检测误伤。
+    {
+      std::string okGraph = fusionCreate("acyclic");
+      okGraph = fusionAddIn(okGraph, "matmul", "a", "x");
+      okGraph = fusionAddIn(okGraph, "relu", "b", "a");
+      std::string r = fusionApply(okGraph);
+      check(r.find("linear_relu") != std::string::npos, "无环图能正常完成融合");
+    }
+
+    // --- autotune:代价模型自洽 ---
+    xmex::Value opS = str("matmul");
+    xmex::Value mI = int_(1024), nI = int_(4096), kI = int_(768);
+    xmex::Value tuned = fusion_autotune(&opS, &mI, &nI, &kI);
+    std::string tuneText(str_data(&tuned), static_cast<size_t>(str_size(&tuned)));
+    check(tuneText.find("\"tile_m\"") != std::string::npos, "autotune 返回 tile 配置");
+    check(tuneText.find("\"grid_x\"") != std::string::npos, "autotune 返回 grid 尺寸");
+    check(tuneText.find("\"score\"") != std::string::npos,
+          "autotune 给出代价模型的评分(而非只按取模最小)");
+    check(tuneText.find("RTX 4090") == std::string::npos,
+          "autotune 不再声称结果绑定某张卡");
+
   }
 
   std::printf("\n%s (%d failures)\n", g_failures ? "FAILED" : "PASSED", g_failures);

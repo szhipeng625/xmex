@@ -339,16 +339,39 @@ inline std::string create_graph(const std::string &name) {
   return to_string(result);
 }
 
-// 添加算子
+// 添加算子。inputs 为空时按旧语义接到最后一个节点之后(串链)。
+// 传了 inputs 则显式连边,支持分叉/合流 —— 融合匹配依赖真实的数据依赖边。
 inline std::string add_op(const std::string &graph,
                            const std::string &opType,
                            const std::string &opName,
-                           const std::string &params = "{}") {
+                           const std::string &params = "{}",
+                           const std::string &inputs = "") {
   xmex::Value g = from_string(graph);
   xmex::Value type = from_string(opType);
   xmex::Value name = from_string(opName);
   xmex::Value p = from_string(params);
-  xmex::Value result = fusion_add_op(&g, &type, &name, &p);
+  xmex::Value ins = inputs.empty() ? none_() : from_string(inputs);
+  xmex::Value result = fusion_add_op_v(&g, &type, &name, &p, &ins);
+  return to_string(result);
+}
+
+// 显式声明图输出。逗号分隔的节点名。
+// 死节点消除靠它区分「真正的末端」与「中途分叉出去的死分支」。
+inline std::string set_outputs(const std::string &graph,
+                               const std::string &outputs) {
+  xmex::Value g = from_string(graph);
+  xmex::Value o = from_string(outputs);
+  xmex::Value result = fusion_set_outputs(&g, &o);
+  return to_string(result);
+}
+
+// 只返回优化后的图(无报告)。options 可传
+// {"cse":false,"dead":true,"chain":true,"qkv":true} 开关各 Pass。
+inline std::string optimize(const std::string &graph,
+                            const std::string &options = "") {
+  xmex::Value g = from_string(graph);
+  xmex::Value opt = options.empty() ? none_() : from_string(options);
+  xmex::Value result = fusion_optimize_v(&g, &opt);
   return to_string(result);
 }
 

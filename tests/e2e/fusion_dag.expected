@@ -1,0 +1,8 @@
+has_edges: True
+res_is_branch: True
+has_linear_relu: True
+has_optimized: True
+optimized_fused: True
+stats_reduced: True
+optimized_is_graph: True
+keeps_fc2: True

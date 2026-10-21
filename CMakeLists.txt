@@ -516,6 +516,7 @@ set(E2E_CASES
   dicts
   fib
   for_step
+  fusion_dag
   gc_stress
   if_else
   inplace_add

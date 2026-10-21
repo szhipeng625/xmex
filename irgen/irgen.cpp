@@ -425,6 +425,11 @@ Value *IRGen::genMethodCall(const Call *e, const Attribute *attr) {
 //
 // ⚠️ C 侧必须用**可变参数**(`...`)才能接受 —— LLVM 层无法表达 C 变参,
 // 声明时还是按固定个数生成函数类型。
+//
+// ⚠️⚠️ 返回值是**补齐后的完整固定元数**(含全部指针参数),不是「可选参数的
+// 个数」。例:http_get_v 在 C 侧是 (url, timeout) 两个指针 → 填 2。
+// 填错的后果不是静默降级,而是 module verifier 当场报
+// "Incorrect number of arguments passed to called function"。
 static size_t builtinOptionalArgs(const char *rtFn) {
   // http.get(url, timeout) / post(url, body, timeout) / head(url, timeout)
   if (std::string(rtFn) == "http_get_v") return 2;
@@ -434,6 +439,17 @@ static size_t builtinOptionalArgs(const char *rtFn) {
   if (std::string(rtFn) == "http_request_v") return 6;
   // kv.reconcile_start(interval_ms) —— 允许不传(默认 1s)
   if (std::string(rtFn) == "kv_reconcile_start_v") return 1;
+  // fusion.add_op(graph, type, name, params[, inputs]) —— inputs 可选。
+  // 不传时运行时按旧语义把新节点接到最后一个节点之后。
+  //
+  // ⚠️ 返回值是**补齐后的固定元数**,不是「可选参数的个数」。
+  // fusion_add_op_v 在 C 侧是 (graph, type, name, params, inputs) 五个指针,
+  // 写成 4 会让 5 参调用点的 IR 少传一个 slot —— LLVM 的 module verifier
+  // 直接报 "Incorrect number of arguments passed to called function"。
+  if (std::string(rtFn) == "fusion_add_op_v") return 5;
+  // fusion.optimize(graph[, options]) —— options 可选。
+  // 固定元数是 2(graph + options),缺 options 时补 None。
+  if (std::string(rtFn) == "fusion_optimize_v") return 2;
   return 0;   // 0 = 无需补齐
 }
 
@@ -475,7 +491,9 @@ static const char *builtinModulePrefix(const std::string &mod, const std::string
   // Fusion 模块
   if (mod == "fusion") {
     if (fn == "create_graph") return "fusion_create_graph";
-    if (fn == "add_op") return "fusion_add_op";
+    if (fn == "add_op") return "fusion_add_op_v";
+    if (fn == "optimize") return "fusion_optimize_v";
+    if (fn == "set_outputs") return "fusion_set_outputs";
     if (fn == "apply_rules") return "fusion_apply_rules";
     if (fn == "generate_kernel") return "fusion_generate_kernel";
     if (fn == "autotune") return "fusion_autotune";

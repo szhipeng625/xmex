@@ -318,6 +318,15 @@ xmex::Value cuda_memcpy_from_device(const xmex::Value *handle, const xmex::Value
 xmex::Value fusion_create_graph(const xmex::Value *name);
 xmex::Value fusion_add_op(const xmex::Value *graph, const xmex::Value *opType,
                           const xmex::Value *opName, const xmex::Value *params);
+// 带 inputs 的变参入口:inputs 可为 list[str] 或 "a,b,c",支持分叉/合流。
+// irgen 在调用点把缺失的第 5 个参数补成 None(见 builtinOptionalArgs)。
+xmex::Value fusion_add_op_v(const xmex::Value *graph, const xmex::Value *opType,
+                            const xmex::Value *opName, const xmex::Value *params, ...);
+// 只返回优化后的图(无报告)
+xmex::Value fusion_optimize(const xmex::Value *graph, const xmex::Value *options);
+xmex::Value fusion_optimize_v(const xmex::Value *graph, ...);
+// 显式声明图输出 —— 死节点消除靠它区分「真正的末端」与「悬空分支」
+xmex::Value fusion_set_outputs(const xmex::Value *graph, const xmex::Value *outputs);
 xmex::Value fusion_apply_rules(const xmex::Value *graph);
 xmex::Value fusion_generate_kernel(const xmex::Value *fusedOp, const xmex::Value *config);
 xmex::Value fusion_autotune(const xmex::Value *opType, const xmex::Value *M,
